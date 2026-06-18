@@ -1,0 +1,8 @@
+rioxarray
+pandas
+owslib
+pyproj
+geopandas
+matplotlib
+plotly
+wells4hydrogeology
