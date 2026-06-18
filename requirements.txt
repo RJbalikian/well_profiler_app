@@ -1,5 +1,7 @@
 rioxarray
 pandas
+folium
+streamlit-folium
 owslib
 pyproj
 geopandas
