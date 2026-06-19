@@ -94,12 +94,13 @@ def main():
             st.session_state.well_df_IN = ingest_table()
             st.session_state.tableTab.dataframe(st.session_state.well_df_IN)
 
+        xcol, ycol, crscol = wellincol.columns([0.3, 0.3, 0.6])
+
         colDisabled = False
         if not hasattr(st.session_state, "well_columns"):
             st.session_state.well_columns = []
             colDisabled = True
-
-        xcol, ycol, crscol = wellincol.columns([0.3, 0.3, 0.6])
+        
         xcol.selectbox('X Coordinate Column', key='xcoord_col',
                        options=st.session_state.well_columns,
                        disabled=colDisabled)
@@ -110,6 +111,11 @@ def main():
         crscol.selectbox(label="Well Coordinates CRS", options=CRS_STR_LIST,
                          index=DEFAULT_POINTS_CRS_INDEX,
                          key='well_input_crs')
+        wellincol.toggle('Plot Well Points',
+                         value=False,
+                         key='plot_points_toggle',
+                         disabled=colDisabled,
+                         on_change=plot_well_points)
         
         # Elevation input
         wellincol.header('Elevation', divider='rainbow')
@@ -157,6 +163,11 @@ def main():
                     tooltip="Current Profile",
                     popup="Current Profile",
                 ).add_to(m)
+
+                if hasattr(st.session_state, 'do_plot_wells'):
+                    if st.session_state.do_plot_wells:
+                        #folium.Marker().add_to(m)
+                        print("PLOT POINTS!!")
 
                 draw_base_map(map=m)
                 st.session_state.new_map_draw = True
@@ -452,12 +463,18 @@ def get_utm_crs(point_geometry):
         ),
         )
 
-    print()
-
     # The first result is the best match
     utm_crs = utm_crs_list[0]
     st.session_state.utm_crs_code = utm_crs.code
     return utm_crs.code
+
+
+def plot_well_points():
+    if st.session_state.plot_points_toggle:
+        st.session_state.do_plot_wells = True
+    else:
+        st.session_state.do_plot_wells = False
+
 
 def ingest_profile():
     profileBytes = st.session_state.profile_uploader.getvalue()
@@ -503,6 +520,27 @@ def ingest_table():
 
     st.session_state.well_df_IN = wellDF
     st.session_state.well_columns = wellDF.columns
+
+    possibleXCols = ['longitude', 'lon', 'x', 'xcoord', 'east', 'easting', 'utme']
+    possibleYCols = ['latitude', 'lat', 'y', 'ycoord', 'north', 'northing', 'utmn']
+    xColIndex = 0
+    yColIndex = 0
+    
+    for colname in st.session_state.well_columns:
+        xColCond1 = colname.lower() in possibleXCols
+        xColCond2 = str(colname).lower().startswith('x')
+        if xColCond1 or xColCond2:
+            xColIndex = colname
+            continue
+        
+        yColCond1 = colname.lower() in possibleYCols
+        yColCond2 = str(colname).lower().startswith('y')
+        if yColCond1 or yColCond2:
+            yColIndex = colname
+            continue
+
+    st.session_state.xcoord_col = xColIndex
+    st.session_state.ycoord_col = yColIndex
     return wellDF
 
     #blocsdf = boreholeLoc_df[['API10', 'LONGITUDE', "LATITUDE"]]
