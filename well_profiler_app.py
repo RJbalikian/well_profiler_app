@@ -1,5 +1,6 @@
 from io import BytesIO
 import pathlib
+import traceback
 
 from streamlit_folium import st_folium
 from folium.plugins import Draw
@@ -74,7 +75,7 @@ def main():
             uploadCol.header("Use map to draw profile", text_alignment='right')
         bSizeCol, bUnitCol, bEmptyCol = st.session_state.mapCol.columns([0.2, 0.2, 0.6])
         bSizeCol.number_input("Buffer size", min_value=0.0, format="%0.1f",
-                              value=5.0,
+                              value=1.0,
                               key='buffer_size')
         bUnitCol.selectbox('Buffer Size Unit',
                            options=['feet', 'meters', 'kilometers', 'miles'],
@@ -91,9 +92,11 @@ def main():
             wellincol.file_uploader("Upload Well Data",
                                 key='well_uploader', on_change=ingest_table)
         else:
-            st.session_state.well_df_IN = ingest_table()
-            st.session_state.tableTab.dataframe(st.session_state.well_df_IN)
-
+            st.session_state.wellGDF = ingest_table()
+            if st.session_state.wellGDF is not None:
+                st.session_state.tableTab.dataframe(st.session_state.wellGDF.to_arrow(geometry_encoding='geoarrow'))
+            else:
+                st.session_state.tableTab.write("Point table not read in correctly")
         xcol, ycol, crscol = wellincol.columns([0.3, 0.3, 0.6])
 
         colDisabled = False
@@ -144,7 +147,7 @@ def main():
             if "new_map_draw" not in st.session_state:
                 st.session_state.new_map_draw = False
             if 'map_result' not in st.session_state:
-                st.session_state.map_result = {'last_active_drawing':None}
+                st.session_state.map_result = {'last_active_drawing': None}
 
             if not st.session_state.new_map_draw:
                 print("DRAWING BASE MAP")
@@ -163,11 +166,6 @@ def main():
                     tooltip="Current Profile",
                     popup="Current Profile",
                 ).add_to(m)
-
-                if hasattr(st.session_state, 'do_plot_wells'):
-                    if st.session_state.do_plot_wells:
-                        #folium.Marker().add_to(m)
-                        print("PLOT POINTS!!")
 
                 draw_base_map(map=m)
                 st.session_state.new_map_draw = True
@@ -203,7 +201,7 @@ def draw_base_map(map=None):
             style_function=lambda x: {
                 "fillColor": "black",
                 "color": "black",
-                "weight": 0,
+                "weight": 0, 'interactive': False,
                 "fillOpacity": 0.1,
             }
         ).add_to(m)
@@ -211,7 +209,7 @@ def draw_base_map(map=None):
         folium.PolyLine(
             locations=[(lon, lat) for lon, lat in st.session_state.current_profile.coords],
             name="Current Profile",
-            color='black',
+            color='black', interactive=False,
             weight=3,
         ).add_to(m)
 
@@ -219,6 +217,40 @@ def draw_base_map(map=None):
 
         m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]],
                      padding=[50, 50])
+
+    wellPlotCond = hasattr(st.session_state, 'do_plot_wells') and st.session_state.do_plot_wells
+    print("WELLPLOTCOND", wellPlotCond)
+    if wellPlotCond:
+
+        if hasattr(st.session_state, 'buffer_points') and st.session_state.buffer_points is not None:
+            #folium.Marker().add_to(m)
+            print("PLOTTING WELLS!")
+            df = st.session_state.buffer_points.drop(columns=['geometry'])
+            df.dropna(subset=["LATITUDE", "LONGITUDE"], inplace=True)
+            print("PLOTTING ", df.shape[0], ' points')
+            for row in df.itertuples():
+                folium.CircleMarker(
+                    location=[row.LATITUDE, row.LONGITUDE],
+                    radius=1.5, fillOpacity=1, fillColor='blue',
+                    weight=0, interactive=False,
+                    hover=True,
+                    overlay=False, tooltip=row.API10,
+                ).add_to(m)
+            print('done')
+        elif hasattr(st.session_state, 'wellGDF') and st.session_state.wellGDF is not None:
+            print("plotting all welsl")
+            df = st.session_state.wellGDF.drop(columns=['geometry'])
+            df.dropna(subset=["LATITUDE", "LONGITUDE"], inplace=True)            
+            for row in df.itertuples():
+                folium.CircleMarker(
+                    location=[row.LATITUDE, row.LONGITUDE],
+                    radius=1.5, fillOpacity=1, fillColor='blue',
+                    weight=0, interactive=False,
+                    hover=True,
+                    overlay=False, tooltip=row.API10,
+                ).add_to(m)
+            print('done')
+
 
     # Show the draw tool
     Draw(
@@ -262,6 +294,12 @@ def check_map_drawings():
     st.session_state.current_profile = LineString([[lat, lon] for lon, lat in coords])
     make_profiles()
 
+    if hasattr(st.session_state, "profile_buffer") and hasattr(st.session_state, "wellGDF"):
+        st.session_state.buffer_points = gpd.sjoin(left_df=st.session_state.wellGDF,
+                                                right_df=st.session_state.profile_buffer,
+                                                how="inner",
+                                                predicate="intersects")
+
 def make_profiles():
     if st.session_state.profile_type == 'Upload':
         try:
@@ -292,9 +330,9 @@ def make_profiles():
     profileUTMBuffer = gpd.GeoDataFrame(profileUTMBuffer, geometry=0)
     st.session_state.profile_buffer = profileUTMBuffer.to_crs("EPSG:4326")
 
-    if hasattr(st.session_state, 'points_df') and isinstance(st.session_state.points_df, (gpd.GeoDataFrame)):
-        points_in_polygon = gpd.sjoin(left_df=st.session_state.points_df,
-                                      right_df=profileUTMBuffer,
+    if hasattr(st.session_state, 'wellGDF') and isinstance(st.session_state.wellGDF, (gpd.GeoDataFrame)):
+        st.session_state.buffer_points = gpd.sjoin(left_df=st.session_state.wellGDF,
+                                      right_df=st.session_state.profile_buffer,
                                       how="inner",
                                       predicate="intersects")
 
@@ -492,31 +530,37 @@ def ingest_table():
         wellDF = pd.read_csv(BytesIO(profileBytes))
 
     else:
-        server = "datastorm.prairie.illinois.edu"
-        database = "GEOPROD"
-        driver = "ODBC Driver 17 for SQL Server" # Adjust based on your installed driver version
-        connection_url = f"mssql+pyodbc://@{server}/{database}?driver=ODBC+Driver+17+for+SQL+Server&trusted_connection=yes"
-        engine = create_engine(connection_url)
+        try:
+            server = "datastorm.prairie.illinois.edu"
+            database = "GEOPROD"
+            driver = "ODBC Driver 17 for SQL Server" # Adjust based on your installed driver version
+            connection_url = f"mssql+pyodbc://@{server}/{database}?driver=ODBC+Driver+17+for+SQL+Server&trusted_connection=yes"
+            engine = create_engine(connection_url)
 
-        boreholeLoc_df = pd.read_sql_table(table_name='Borehole_Locations',
-                                           con=engine,
-                                           schema='ISGS2',
-                                           columns=['API10', 'LONGITUDE', "LATITUDE"])
+            boreholeLoc_df = pd.read_sql_table(table_name='Borehole_Locations',
+                                            con=engine,
+                                            schema='ISGS2',
+                                            columns=['API10', 'LONGITUDE', "LATITUDE"])
 
-        downhole_df = pd.read_sql_table(table_name='vw_downhole_data',
-                                        con=engine,
-                                        schema='ISGS2',
-                                        columns=['api10', 'formation', "top", "bottom"]
-                                        )
+            downhole_df = pd.read_sql_table(table_name='vw_downhole_data',
+                                            con=engine,
+                                            schema='ISGS2',
+                                            columns=['api10', 'formation', "top", "bottom"]
+                                            )
 
-        wellDF = pd.merge(left=downhole_df,
-                          right=boreholeLoc_df,
-                          how='inner',
-                          left_on='api10',
-                          right_on='API10')
-        wellDF.drop('api10', axis=1, inplace=True)
-        wellDF = wellDF[['API10', 'LONGITUDE', 'LATITUDE', 'formation', 'top', 'bottom']]
-        wellDF.columns = wellDF.columns.str.upper()
+            wellDF = pd.merge(left=downhole_df,
+                            right=boreholeLoc_df,
+                            how='inner',
+                            left_on='api10',
+                            right_on='API10')
+            wellDF.drop('api10', axis=1, inplace=True)
+            wellDF.dropna(subset=["LATITUDE", "LONGITUDE"], inplace=True)
+            wellDF = wellDF[['API10', 'LONGITUDE', 'LATITUDE', 'formation', 'top', 'bottom']]
+            wellDF.columns = wellDF.columns.str.upper()
+        except Exception:
+            wellDF = pd.DataFrame()
+
+            traceback.print_exc()
 
     st.session_state.well_df_IN = wellDF
     st.session_state.well_columns = wellDF.columns
@@ -525,14 +569,14 @@ def ingest_table():
     possibleYCols = ['latitude', 'lat', 'y', 'ycoord', 'north', 'northing', 'utmn']
     xColIndex = 0
     yColIndex = 0
-    
+
     for colname in st.session_state.well_columns:
         xColCond1 = colname.lower() in possibleXCols
         xColCond2 = str(colname).lower().startswith('x')
         if xColCond1 or xColCond2:
             xColIndex = colname
             continue
-        
+
         yColCond1 = colname.lower() in possibleYCols
         yColCond2 = str(colname).lower().startswith('y')
         if yColCond1 or yColCond2:
@@ -541,7 +585,30 @@ def ingest_table():
 
     st.session_state.xcoord_col = xColIndex
     st.session_state.ycoord_col = yColIndex
-    return wellDF
+
+    try:
+        geocol = gpd.points_from_xy(wellDF[st.session_state.xcoord_col],
+                                    wellDF[st.session_state.ycoord_col])
+
+        gdf = gpd.GeoDataFrame(wellDF,
+                               geometry=geocol,
+                               crs=CRS_DICT[st.session_state.well_input_crs].code)
+    except Exception:
+        traceback.print_exc()
+        gdf = None
+
+    if gdf is not None:
+        st.session_state.wellGDF = gdf.to_crs('EPSG:4326')
+
+        if hasattr(st.session_state, "profile_buffer"):
+            st.session_state.buffer_points = gpd.sjoin(left_df=gdf,
+                                                       right_df=st.session_state.profile_buffer,
+                                                       how="inner",
+                                                       predicate="intersects")
+    else:
+        st.session_state.buffer_points = None
+
+    return gdf
 
     #blocsdf = boreholeLoc_df[['API10', 'LONGITUDE', "LATITUDE"]]
     #downholeLocsDF = pd.merge(left=downhole_df, right=blocsdf, how='inner',left_on='api10', right_on='API10')
