@@ -8,15 +8,18 @@ import folium
 
 import geopandas as gpd
 import matplotlib.pyplot as plt
+import numpy as np
 from owslib.wms import WebMapService
 import pandas as pd
 import plotly
+import plotly.express as px
 import pyproj
 import requests
 import rioxarray as rxr
 from shapely.geometry import LineString
 from sqlalchemy import create_engine
 import streamlit as st
+import xarray as xr
 
 st.set_page_config(page_title='Well Profiler App',
                    page_icon=':material/full_stacked_bar_chart:',
@@ -132,6 +135,7 @@ def main():
         eSource = st.session_state.elev_source
         if eSource == 'Illinois lidar':
             eSpecCol.write('Using ISGS statewide lidar dataset.')
+            st.session_state.raster_crs = "EPSG:3857 - WGS 84 / Pseudo-Mercator"
         elif eSource == 'Input table':
             eColOpts = []
             if hasattr(st.session_state, 'well_columns'):
@@ -221,7 +225,6 @@ def draw_base_map(map=None):
     wellPlotCond = hasattr(st.session_state, 'do_plot_wells') and st.session_state.do_plot_wells
     print("WELLPLOTCOND", wellPlotCond)
     if wellPlotCond:
-
         if hasattr(st.session_state, 'buffer_points') and st.session_state.buffer_points is not None:
             #folium.Marker().add_to(m)
             print("PLOTTING WELLS!")
@@ -240,8 +243,11 @@ def draw_base_map(map=None):
         elif hasattr(st.session_state, 'wellGDF') and st.session_state.wellGDF is not None:
             print("plotting all welsl")
             df = st.session_state.wellGDF.drop(columns=['geometry'])
-            df.dropna(subset=["LATITUDE", "LONGITUDE"], inplace=True)            
-            for row in df.itertuples():
+            df.dropna(subset=["LATITUDE", "LONGITUDE"], inplace=True)
+            import numpy as np
+            indices_100 = np.arange(0, df.shape[0], 100)
+            dftoPlot = df.iloc[indices_100]
+            for row in dftoPlot.itertuples():
                 folium.CircleMarker(
                     location=[row.LATITUDE, row.LONGITUDE],
                     radius=1.5, fillOpacity=1, fillColor='blue',
@@ -251,6 +257,9 @@ def draw_base_map(map=None):
                 ).add_to(m)
             print('done')
 
+    # Plot profile!!
+    #for i, row in st.session_state.buffer_points.iterrows():
+        
 
     # Show the draw tool
     Draw(
@@ -336,12 +345,18 @@ def make_profiles():
                                       how="inner",
                                       predicate="intersects")
 
+        if hasattr(st.session_state, 'elevation_data'):
+            xArr = xr.DataArray(st.session_state.buffer_points['LONGITUDE'].values, dims="points")
+            yArr = xr.DataArray(st.session_state.buffer_points["LATITUDE"].values, dims="points")
+
+            st.session_state.buffer_points['ELEVATION_M'] = st.session_state.elevation_data.sel(x=xArr, y=yArr, method="nearest").values
+
 def profile_type_update():
     if st.session_state.profile_type == 'Selection':
         st.session_state.profile_crs = DEFAULT_POINTS_CRS
         print("UPDATED", st.session_state.profile_crs)
 
-@st.cache_data
+@st.cache_resource
 def get_elevation(coords=None,
                   elevation_col_name='elevation',
                   xcoord_col_name='xcoord', ycoord_col_name='ycoord',
@@ -357,21 +372,21 @@ def get_elevation(coords=None,
        This was adapted from a standalone python script, so there are inputs/parameters that may
        not be relevant in the streamlit app.
     """
-    coords = st.session_state.coords
+    #coords = st.session_state.coords
     elevation_col_name = "ELEVATION"
     xcoord_col_name = st.session_state.xcoord_col
     ycoord_col_name = st.session_state.ycoord_col
-    points_crs = st.session_state.well_input_crs
-    output_crs = st.session_state.project_crs
+    points_crs = CRS_DICT[st.session_state.well_input_crs].code
+    output_crs = CRS_DICT[st.session_state.project_crs].code
     elev_source_type = 'service'
     raster_crs = None
 
-    if coords is None:
-        coordType = st.session_state.coordinate_type
-        if coordType == "Single":
-            coords = (st.session_state.xcoord, st.session_state.ycoord)
-        elif coordType == 'Multiple' or coordType == 'Upload':
-            coords = st.session_state.point_table
+    #if coords is None:
+    #    coordType = st.session_state.coordinate_type
+    #    if coordType == "Single":
+    #        coords = (st.session_state.xcoord, st.session_state.ycoord)
+    #    elif coordType == 'Multiple' or coordType == 'Upload':
+    #        coords = st.session_state.point_table
         #if st.session_state.points_source=='Enter coords.':
             #coords = (-88.857362, 42.25637743)
 
@@ -403,81 +418,87 @@ def get_elevation(coords=None,
                                                            always_xy=True)
 
     # Access (geo)dataframe to get location info
-    xcoord = coords[xcoord_col_name]
-    ycoord = coords[ycoord_col_name]
+    if hasattr(st.session_state, 'wellDF') and st.session_state.wellDF is not None:
+        coords = st.session_state.wellDF
+        xcoord = coords[xcoord_col_name]
+        ycoord = coords[ycoord_col_name]
 
-    xcoord_OUT, ycoord_OUT = ptCoordTransformerOUT.transform(xcoord, ycoord)
-    xcoord_RAST, ycoord_RAST = ptCoordTransformerRaster.transform(xcoord, ycoord)
+        xcoord_OUT, ycoord_OUT = ptCoordTransformerOUT.transform(xcoord, ycoord)
+        xcoord_RAST, ycoord_RAST = ptCoordTransformerRaster.transform(xcoord, ycoord)
 
-    minXRast = min(xcoord_RAST)
-    maxXRast = max(xcoord_RAST)
-    minYRast = min(ycoord_RAST)
-    maxYRast = max(ycoord_RAST)
+        minXRast = min(xcoord_RAST)
+        maxXRast = max(xcoord_RAST)
+        minYRast = min(ycoord_RAST)
+        maxYRast = max(ycoord_RAST)
 
-    cols = [f"{points_crs}_xIN", f"{points_crs}_yIN", f"{output_crs}_x", f"{output_crs}_y"]
-    dfList = []
-    for i, xcoordi in enumerate(xcoord):
-        dfList.append([xcoord[i], ycoord[i], xcoord_OUT[i], ycoord_OUT[i]])
-    coords = pd.DataFrame(dfList, columns=cols)
+        cols = [f"{points_crs}_xIN", f"{points_crs}_yIN", f"{output_crs}_x", f"{output_crs}_y"]
+        dfList = []
+        for i, xcoordi in enumerate(xcoord):
+            dfList.append([xcoord[i], ycoord[i], xcoord_OUT[i], ycoord_OUT[i]])
+        coords = pd.DataFrame(dfList, columns=cols)
 
-    # Get padding for visualization purposes
-    xPad = (maxXRast-minXRast)*0.1
-    yPad = (maxYRast-minYRast)*0.1
+        # Get padding for visualization purposes
+        xPad = (maxXRast-minXRast)*0.1
+        yPad = (maxYRast-minYRast)*0.1
 
-    if float(xPad) == 0.0:
-        xPad = maxXRast * 0.01
-        xPad = abs(xPad)
-        if abs(xPad) > 7500:
-            xPad = 7500
+        if float(xPad) == 0.0:
+            xPad = maxXRast * 0.01
+            xPad = abs(xPad)
+            if abs(xPad) > 7500:
+                xPad = 7500
 
-    if float(yPad) == 0.0:
-        yPad = maxYRast * 0.01
-        yPad = abs(yPad)
-        if abs(yPad) > 7500:
-            yPad = 7500
+        if float(yPad) == 0.0:
+            yPad = maxYRast * 0.01
+            yPad = abs(yPad)
+            if abs(yPad) > 7500:
+                yPad = 7500
 
-    rasterXMin = minXRast-xPad
-    rasterXMax = maxXRast+xPad
+        rasterXMin = minXRast-xPad
+        rasterXMax = maxXRast+xPad
 
-    rasterYMin = minYRast-yPad
-    rasterYMax = maxYRast+yPad
+        rasterYMin = minYRast-yPad
+        rasterYMax = maxYRast+yPad
 
-    # Read in data from service or file, as appropriate
-    # ISGS lidar is from the statewide WGS84 service, read in as an (rio)xarray DataSet
-    if "Illinois" in st.session_state.elev_source:
-        wms = WebMapService(elevation_source)
+        # Read in data from service or file, as appropriate
+        # ISGS lidar is from the statewide WGS84 service, read in as an (rio)xarray DataSet
+        if "Illinois" in st.session_state.elev_source:
+            wms = WebMapService(elevation_source)
 
-        bbox = (rasterXMin, rasterYMin, rasterXMax, rasterYMax)
+            bbox = (rasterXMin, rasterYMin, rasterXMax, rasterYMax)
 
-        img = wms.getmap(
-            layers=['IL_Statewide_Lidar_DEM_WGS:None'],
-            srs='EPSG:3857',
-            bbox=bbox,
-            size=(256, 256),
-            format='image/tiff',
-            transparent=True
-            )
+            img = wms.getmap(
+                layers=['IL_Statewide_Lidar_DEM_WGS:None'],
+                srs='EPSG:3857',
+                bbox=bbox,
+                size=(256, 256),
+                format='image/tiff',
+                transparent=True
+                )
 
-        bio = BytesIO(img.read())
-        elevData_rxr = rxr.open_rasterio(bio)
-        elevData_ft = elevData_rxr.rio.reproject(output_crs)
-        elevData_m = elevData_ft * 0.3048
-    else:
-        # GMRT_URL = r"https://www.gmrt.org:443/services/GridServer?minlongitude=-88.4&maxlongitude=-88.2%2C%20&minlatitude=40.1&maxlatitude=40.3&format=geotiff&resolution=default&layer=topo"
-        GMRT_URL = GMRT_BASE_URL.replace('minlongitude', f"minlongitude={rasterXMin:0.4f}")
-        GMRT_URL = GMRT_URL.replace('maxlongitude', f"maxlongitude={rasterXMax:0.4f}")
-        GMRT_URL = GMRT_URL.replace('minlatitude', f"minlatitude={rasterYMin:0.4f}")
-        GMRT_URL = GMRT_URL.replace('maxlatitude', f"maxlatitude={rasterYMax:0.4f}")
+            bio = BytesIO(img.read())
+            elevData_rxr = rxr.open_rasterio(bio)
+            elevData_ft = elevData_rxr.rio.reproject(output_crs)
+            elevData_m = elevData_ft * 0.3048
+            st.session_state.elevation_data = elevData_m
+        else:
+            # GMRT_URL = r"https://www.gmrt.org:443/services/GridServer?minlongitude=-88.4&maxlongitude=-88.2%2C%20&minlatitude=40.1&maxlatitude=40.3&format=geotiff&resolution=default&layer=topo"
+            GMRT_URL = GMRT_BASE_URL.replace('minlongitude', f"minlongitude={rasterXMin:0.4f}")
+            GMRT_URL = GMRT_URL.replace('maxlongitude', f"maxlongitude={rasterXMax:0.4f}")
+            GMRT_URL = GMRT_URL.replace('minlatitude', f"minlatitude={rasterYMin:0.4f}")
+            GMRT_URL = GMRT_URL.replace('maxlatitude', f"maxlatitude={rasterYMax:0.4f}")
 
-        response = requests.get(url=GMRT_URL)
-        with BytesIO(response.content) as f:
-            elevData_rxr = rxr.open_rasterio(f)
-        elevData_m = elevData_rxr.rio.reproject(output_crs)
+            response = requests.get(url=GMRT_URL)
+            with BytesIO(response.content) as f:
+                elevData_rxr = rxr.open_rasterio(f)
+            elevData_m = elevData_rxr.rio.reproject(output_crs)
 
-        if 'band' in elevData_m.dims:
-            elevData_m = elevData_m.isel(band=0)
+            if 'band' in elevData_m.dims:
+                elevData_m = elevData_m.isel(band=0)
 
-        elevData_ft = elevData_m / 0.3048
+            elevData_ft = elevData_m / 0.3048
+            st.session_state.elevation_data = elevData_m
+
+        return elevData_m
 
 def read_profile():
     sa_gdf = gpd.read_file()
@@ -505,6 +526,7 @@ def get_utm_crs(point_geometry):
     utm_crs = utm_crs_list[0]
     st.session_state.utm_crs_code = utm_crs.code
     return utm_crs.code
+
 
 
 def plot_well_points():
@@ -605,8 +627,16 @@ def ingest_table():
                                                        right_df=st.session_state.profile_buffer,
                                                        how="inner",
                                                        predicate="intersects")
+
+        if hasattr(st.session_state, 'elevation_data'):
+            xArr = xr.DataArray(st.session_state.buffer_points['LONGITUDE'].values, dims="points")
+            yArr = xr.DataArray(st.session_state.buffer_points["LATITUDE"].values, dims="points")
+
+            st.session_state.buffer_points['ELEVATION_M'] = st.session_state.elevation_data.sel(x=xArr, y=yArr, method="nearest").values
     else:
         st.session_state.buffer_points = None
+
+    st.session_state.elevation_data = get_elevation()
 
     return gdf
 
@@ -620,6 +650,6 @@ def ingest_table():
     #pvDF = pvDF[pvDF["LATITUDE"] < 42]
     #pvDF.plot(x='LONGITUDE', y="LATITUDE", kind='scatter', s=0.1, c='k')
 
-
 if __name__ == "__main__":
     main()
+    cached_elev_m = get_elevation()
