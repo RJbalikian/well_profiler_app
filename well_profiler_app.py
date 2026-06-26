@@ -829,14 +829,17 @@ def plot_well_profile():
             xarr = [row[distCol], row[distCol]]
             yarr = [row["TOP_ELEV"], row["BOTTOM_ELEV"]]
 
-            xboxarr, yboxarr = linetobox(xarr, yarr)
+            xboxarr = xarr
+            yboxarr = yarr
+            #xboxarr, yboxarr = linetobox(xarr, yarr)
+            
             legendName = row['INTERPRETED']
             showLegend = True
             if row['INTERPRETED'] in legendList:
                 showLegend = False
                 
-            hoverText = f"Well: {row['API10']}<br>Formation: {row['FORMATION']}<br>Interpreted: {row['INTERPRETED']}"
-            print("HVRTEXT", hoverText)
+            hoverText = f"Well: {row['API10']} <br> Description: {row['FORMATION'][:25]} <br> Interpretation: {row['INTERPRETED']}"
+            #print("HVRTEXT", hoverText)
             # Define rectangle corners
             try:
                 fColor = COLORMAPDICT[row["INTERPRETED"]]
@@ -846,9 +849,9 @@ def plot_well_profile():
             fig.add_trace(go.Scatter(
                 x=xboxarr,
                 y=yboxarr,
-                fill="toself",
-                fillcolor=fColor,
-                line=dict(color=None, width=0),
+                #fill="toself",
+                #fillcolor=fColor,
+                line=dict(color=fColor, width=2),
                 #linecolor=None,
                 mode='lines',
                             
@@ -858,14 +861,16 @@ def plot_well_profile():
                 #    bgcolor='black',
                 #    size=1,),
                 #hovertemplate=hoverText,
-                text=[hoverText] * 5,
+                #text=hoverText,
+                hoverinfo='text',           # Only show custom text
+                hovertext=hoverText,
                 #hovertemplate=(
                 #    "<b>Well:</b> %{customdata[0]}<br>"
                 #    "<b>Formation:</b> %{customdata[1]}<br>"
                 #    "<b>Interpreted:</b> %{customdata[2]}<br>"
                 #    "<extra></extra>"
                 #),
-                hoverinfo='text',
+                #hovertemplate="%{text}<extra></extra>",
                 showlegend=showLegend,
                 name=legendName
             ))
