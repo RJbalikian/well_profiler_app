@@ -13,12 +13,14 @@ from owslib.wms import WebMapService
 import pandas as pd
 import plotly
 import plotly.express as px
+import plotly.graph_objects as go
 import pyproj
 import requests
 import rioxarray as rxr
 from shapely.geometry import LineString
 from sqlalchemy import create_engine
 import streamlit as st
+import w4h
 import xarray as xr
 
 st.set_page_config(page_title='Well Profiler App',
@@ -42,7 +44,33 @@ DEFAULT_POINTS_CRS_INDEX = CRS_STR_LIST.index(DEFAULT_POINTS_CRS)
 DEFAULT_OUTPUT_CRS = DEFAULT_POINTS_CRS
 
 
+COLORMAPDICT = {'CLAY':'blue', 
+                'BEDROCK':'purple', 
+                'SAND':'gold', 
+                'GRAVEL':'darkgoldenrod', 
+                'SOIL':'black', 
+                'SAND AND GRAVEL':'darkorange', 
+                'UNKNOWN':'silver', 
+                'CLAY AND SAND MIX':'greenyellow', 
+                'GENERIC':'gray', 
+                'SAND AND CLAY MIX':'greenyellow', 
+                'CLAY AND GRAVEL MIX':'olive', 
+                'BEDROCK AND OTHER':'lavender', 
+                'ORGANIC MATERIAL':'black', 
+                'CLAY WITH SAND SEAMS':'greenyellow', 
+                'BOULDERY MATERIAL':'indigo', 
+                'FILL':'gray', 
+                'SILT':'lawngreen', 
+                'GRAVEL AND CLAY MIX':'olive', 
+                'SAND WITH CLAY SEAMS':'greenyellow', 
+                'BOULDER MATERIAL':'indigo', 
+                'CLAY WITH GRAVEL SEAMS':'olive', 
+                'GRAVEL WITH CLAY SEAMS':'olive'}
+COLORDF = pd.DataFrame(COLORMAPDICT, index=['Color']).T.reset_index()
+COLORDF.columns = ['INTERPRETED', "PLOTCOLOR"]
+
 def main():
+
     with st.container(width='stretch', height='stretch'):
         titleCol, projCol, menuCol, tCol = st.columns([0.35, 0.1, 0.05, 0.5],
                                                   vertical_alignment='bottom')
@@ -86,16 +114,17 @@ def main():
 
         # Well Data section
         wellincol.header('Specify Well Data', divider='rainbow')
-        wellincol.pills("Well Data Source",
+        well_source = wellincol.pills("Well Data Source",
                         options=['Table upload', 'Database'],
-                        default='Table upload',
+                        default='Database',
                         key='well_source')
         
         if st.session_state.well_source == 'Table upload':
             wellincol.file_uploader("Upload Well Data",
                                 key='well_uploader', on_change=ingest_table)
         else:
-            st.session_state.wellGDF = ingest_table()
+            st.session_state.wellGDF = wellGDF = ingest_table(well_source)
+            print("TTYPES", type(st.session_state.wellGDF), type(wellGDF))
             if st.session_state.wellGDF is not None:
                 st.session_state.tableTab.dataframe(st.session_state.wellGDF.to_arrow(geometry_encoding='geoarrow'))
             else:
@@ -244,7 +273,6 @@ def draw_base_map(map=None):
             print("plotting all welsl")
             df = st.session_state.wellGDF.drop(columns=['geometry'])
             df.dropna(subset=["LATITUDE", "LONGITUDE"], inplace=True)
-            import numpy as np
             indices_100 = np.arange(0, df.shape[0], 100)
             dftoPlot = df.iloc[indices_100]
             for row in dftoPlot.itertuples():
@@ -258,9 +286,41 @@ def draw_base_map(map=None):
             print('done')
 
     # Plot profile!!
-    #for i, row in st.session_state.buffer_points.iterrows():
-        
+    if hasattr(st.session_state, "buffer_points"):
+        df = st.session_state.buffer_points
+        if not hasattr(st.session_state, "elevation_data"):
+            st.session_state.elevation_data = get_elevation(st.session_state.elev_source)
 
+        if df is not None and "ELEVATION" not in df.columns:
+            if not hasattr(st.session_state, 'elevation_data'):
+                print('We dont even exist!')
+                st.session_state.elevation_data = get_elevation(st.session_state.elev_source)
+            elif st.session_state.elevation_data is None:
+                print("NONE FIRST")
+                st.session_state.elevation_data = get_elevation(st.session_state.elev_source)
+                elevData = get_elevation(st.session_state.elev_source)
+                print('We noned')
+                print("LOCAL elevData", type(elevData))
+                print("STSS elevation_data", type(st.session_state.elevation_data))
+            else:
+                print('We elsed')
+                print(type(st.session_state.elevation_data))
+                print(st.session_state.elevation_data)
+            xs = xr.DataArray(df["LONGITUDE"].values, dims="points")
+            ys = xr.DataArray(df["LATITUDE"].values, dims="points")
+
+            st.session_state.elevation_data[0].plot()
+            zData = st.session_state.elevation_data.sel(x=xs,
+                                                        y=ys,
+                                                        method="nearest").values
+            df['SURFACE_ELEVATION'] = zData
+            
+        if df is not None:
+            df["BOTTOM_ELEV"] = df['SURFACE_ELEVATION'] - df["BOTTOM"]
+            df["TOP_ELEV"] = df['SURFACE_ELEVATION'] - df["TOP"]
+
+            plot_well_profile()                
+        
     # Show the draw tool
     Draw(
         export=False,
@@ -308,6 +368,16 @@ def check_map_drawings():
                                                 right_df=st.session_state.profile_buffer,
                                                 how="inner",
                                                 predicate="intersects")
+        
+        if hasattr(st.session_state, 'elevation_data'):
+            uniqueWells = np.unique(st.session_state.buffer_points['API10'])
+            # Potential update: use xarray indexing to sample data values
+            xs = xr.DataArray(st.session_state.buffer_points["LONGITUDE"].values, dims="points")
+            ys = xr.DataArray(st.session_state.buffer_points["LATITUDE"].values, dims="points")
+
+            elevPts = st.session_state.elevation_data.sel(x=xs, y=ys, method="nearest").values
+            st.session_state['SURFACE_ELEVATION'] = elevPts
+
 
 def make_profiles():
     if st.session_state.profile_type == 'Upload':
@@ -346,23 +416,20 @@ def make_profiles():
                                       predicate="intersects")
 
         if hasattr(st.session_state, 'elevation_data'):
+            if st.session_state.elevation_data is None:
+                st.session_state.elevation_data = get_elevation(st.session_state.elev_source)
             xArr = xr.DataArray(st.session_state.buffer_points['LONGITUDE'].values, dims="points")
             yArr = xr.DataArray(st.session_state.buffer_points["LATITUDE"].values, dims="points")
 
-            st.session_state.buffer_points['ELEVATION_M'] = st.session_state.elevation_data.sel(x=xArr, y=yArr, method="nearest").values
+            st.session_state.buffer_points['SURFACE_ELEVATION'] = st.session_state.elevation_data.sel(x=xArr, y=yArr, method="nearest").values
 
 def profile_type_update():
     if st.session_state.profile_type == 'Selection':
         st.session_state.profile_crs = DEFAULT_POINTS_CRS
         print("UPDATED", st.session_state.profile_crs)
 
-@st.cache_resource
-def get_elevation(coords=None,
-                  elevation_col_name='elevation',
-                  xcoord_col_name='xcoord', ycoord_col_name='ycoord',
-                  points_crs=None, output_crs=None,
-                  elevation_source=None, elev_source_type='service',
-                  raster_crs=None, show_plot=True):
+@st.cache_data
+def get_elevation(elev_source):
 
     """This function takes coordinates, specified raster (services), and specified output CRS
        and extracts the elevation values from the raster at the specified coordinates.
@@ -372,15 +439,33 @@ def get_elevation(coords=None,
        This was adapted from a standalone python script, so there are inputs/parameters that may
        not be relevant in the streamlit app.
     """
+    print("GETTING ELEVATION!!!!!")
+    coords=None
+    elevation_col_name='elevation'
+    xcoord_col_name='xcoord'
+    ycoord_col_name='ycoord'
+    points_crs=None
+    output_crs=None
+    elevation_source=None
+    elev_source_type='service'
+    raster_crs=None
+    show_plot=True
+    
     #coords = st.session_state.coords
     elevation_col_name = "ELEVATION"
     xcoord_col_name = st.session_state.xcoord_col
+    if st.session_state.xcoord_col is None:
+        xcoord_col_name = "LONGITUDE"
+
     ycoord_col_name = st.session_state.ycoord_col
+    if ycoord_col_name is None:
+        ycoord_col_name = "LATITUDE"
+
     points_crs = CRS_DICT[st.session_state.well_input_crs].code
     output_crs = CRS_DICT[st.session_state.project_crs].code
     elev_source_type = 'service'
     raster_crs = None
-
+    print("MADE IT TO THIS PART OF ELEVATION GETTING?")
     #if coords is None:
     #    coordType = st.session_state.coordinate_type
     #    if coordType == "Single":
@@ -391,11 +476,13 @@ def get_elevation(coords=None,
             #coords = (-88.857362, 42.25637743)
 
     # Get the correct/specified raster source
-    if "ISGS" in st.session_state.elev_source:
+    print("CHECKING ESOURCE", hasattr(st.session_state, "elev_source"))
+    if "Illinois" in st.session_state.elev_source:
         elevation_source = IL_LIDAR_URL
     else:
         elevation_source = GMRT_BASE_URL
 
+    print("ESOURCE", elevation_source)
     # Get CRS of points, raster, and specified output
     if points_crs is None:
         points_crs = int(CRS_DICT[st.session_state.point_crs].code)
@@ -408,6 +495,8 @@ def get_elevation(coords=None,
     if output_crs is None:
         output_crs = int(CRS_DICT[st.session_state.output_crs].code)
         output_crs_name = CRS_DICT[st.session_state.output_crs].name
+    elif type(output_crs) is str and output_crs.isnumeric():
+        output_crs = int(output_crs)
 
     # Project coordinates into CRS of raster and specified output CRS
     ptCoordTransformerOUT = pyproj.Transformer.from_crs(crs_from=points_crs,
@@ -418,11 +507,19 @@ def get_elevation(coords=None,
                                                            always_xy=True)
 
     # Access (geo)dataframe to get location info
-    if hasattr(st.session_state, 'wellDF') and st.session_state.wellDF is not None:
-        coords = st.session_state.wellDF
+    print("DO WE HAVE BUFFER POITNS????", hasattr(st.session_state, 'buffer_points'))
+    if hasattr(st.session_state, 'buffer_points'):
+        print(type(st.session_state.buffer_points))
+
+    if hasattr(st.session_state, 'buffer_points') and st.session_state.buffer_points is not None:
+        # if hasattr(st.session_state, 'well_df_IN') and st.session_state.well_df_IN is not None:
+        print("\t yes to buffer points")
+        df = st.session_state.buffer_points
+        
+        coords = df
         xcoord = coords[xcoord_col_name]
         ycoord = coords[ycoord_col_name]
-
+        
         xcoord_OUT, ycoord_OUT = ptCoordTransformerOUT.transform(xcoord, ycoord)
         xcoord_RAST, ycoord_RAST = ptCoordTransformerRaster.transform(xcoord, ycoord)
 
@@ -434,7 +531,7 @@ def get_elevation(coords=None,
         cols = [f"{points_crs}_xIN", f"{points_crs}_yIN", f"{output_crs}_x", f"{output_crs}_y"]
         dfList = []
         for i, xcoordi in enumerate(xcoord):
-            dfList.append([xcoord[i], ycoord[i], xcoord_OUT[i], ycoord_OUT[i]])
+            dfList.append([xcoordi, ycoord.iloc[i], xcoord_OUT[i], ycoord_OUT[i]])
         coords = pd.DataFrame(dfList, columns=cols)
 
         # Get padding for visualization purposes
@@ -462,6 +559,7 @@ def get_elevation(coords=None,
         # Read in data from service or file, as appropriate
         # ISGS lidar is from the statewide WGS84 service, read in as an (rio)xarray DataSet
         if "Illinois" in st.session_state.elev_source:
+            print("READING FROM ILLINOIS DATA WMS")
             wms = WebMapService(elevation_source)
 
             bbox = (rasterXMin, rasterYMin, rasterXMax, rasterYMax)
@@ -476,7 +574,7 @@ def get_elevation(coords=None,
                 )
 
             bio = BytesIO(img.read())
-            elevData_rxr = rxr.open_rasterio(bio)
+            elevData_rxr = rxr.open_rasterio(bio)[0]
             elevData_ft = elevData_rxr.rio.reproject(output_crs)
             elevData_m = elevData_ft * 0.3048
             st.session_state.elevation_data = elevData_m
@@ -498,6 +596,8 @@ def get_elevation(coords=None,
             elevData_ft = elevData_m / 0.3048
             st.session_state.elevation_data = elevData_m
 
+        print("ELEVDATA GOT IT")
+        elevData_m[0].plot()
         return elevData_m
 
 def read_profile():
@@ -545,12 +645,16 @@ def ingest_profile():
     st.session_state.profile_crs = f"{gdfcrs.auth_name}:{gdfcrs.code} - {gdfcrs.name}"
 
 @st.cache_data
-def ingest_table():
+def ingest_table(well_source):
+    print("INGESTING TABLE")
     if st.session_state.well_source == 'Table upload':
         # Can be used wherever a "file-like" object is accepted:
         profileBytes = st.session_state.well_uploader.getvalue()
         wellDF = pd.read_csv(BytesIO(profileBytes))
-
+        wellDF.columns = wellDF.columns.str.upper()
+        well_input_crs = st.session_state.well_input_crs
+        xcoord_col = st.session_state.xcoord_col
+        ycoord_col = st.session_state.ycoord_col
     else:
         try:
             server = "datastorm.prairie.illinois.edu"
@@ -579,66 +683,86 @@ def ingest_table():
             wellDF.dropna(subset=["LATITUDE", "LONGITUDE"], inplace=True)
             wellDF = wellDF[['API10', 'LONGITUDE', 'LATITUDE', 'formation', 'top', 'bottom']]
             wellDF.columns = wellDF.columns.str.upper()
+            well_input_crs = 'EPSG:4269 - NAD83'
+            xcoord_col = "LONGITUDE"
+            ycoord_col = "LATITUDE"
         except Exception:
             wellDF = pd.DataFrame()
 
             traceback.print_exc()
 
-    st.session_state.well_df_IN = wellDF
-    st.session_state.well_columns = wellDF.columns
-
-    possibleXCols = ['longitude', 'lon', 'x', 'xcoord', 'east', 'easting', 'utme']
-    possibleYCols = ['latitude', 'lat', 'y', 'ycoord', 'north', 'northing', 'utmn']
-    xColIndex = 0
-    yColIndex = 0
-
-    for colname in st.session_state.well_columns:
-        xColCond1 = colname.lower() in possibleXCols
-        xColCond2 = str(colname).lower().startswith('x')
-        if xColCond1 or xColCond2:
-            xColIndex = colname
-            continue
-
-        yColCond1 = colname.lower() in possibleYCols
-        yColCond2 = str(colname).lower().startswith('y')
-        if yColCond1 or yColCond2:
-            yColIndex = colname
-            continue
-
-    st.session_state.xcoord_col = xColIndex
-    st.session_state.ycoord_col = yColIndex
-
+    #st.session_state.well_df_IN = wellDF
+    #st.session_state.well_columns = wellDF.columns
+    #print("WELLDFIN", type(st.session_state.well_df_IN))
+    #print("WELLINCRS", type(well_input_crs))
+    #print("XXXCRD", type(st.session_state.xcoord_col))
+    #print("YYYYYYYYYXXXCRD" ,type(st.session_state.ycoord_col))
     try:
-        geocol = gpd.points_from_xy(wellDF[st.session_state.xcoord_col],
-                                    wellDF[st.session_state.ycoord_col])
+        geocol = gpd.points_from_xy(wellDF[xcoord_col],
+                                    wellDF[ycoord_col])
 
         gdf = gpd.GeoDataFrame(wellDF,
                                geometry=geocol,
-                               crs=CRS_DICT[st.session_state.well_input_crs].code)
+                               crs=CRS_DICT[well_input_crs].code).to_crs(4326)
     except Exception:
         traceback.print_exc()
         gdf = None
-
-    if gdf is not None:
-        st.session_state.wellGDF = gdf.to_crs('EPSG:4326')
-
-        if hasattr(st.session_state, "profile_buffer"):
-            st.session_state.buffer_points = gpd.sjoin(left_df=gdf,
-                                                       right_df=st.session_state.profile_buffer,
-                                                       how="inner",
-                                                       predicate="intersects")
-
-        if hasattr(st.session_state, 'elevation_data'):
-            xArr = xr.DataArray(st.session_state.buffer_points['LONGITUDE'].values, dims="points")
-            yArr = xr.DataArray(st.session_state.buffer_points["LATITUDE"].values, dims="points")
-
-            st.session_state.buffer_points['ELEVATION_M'] = st.session_state.elevation_data.sel(x=xArr, y=yArr, method="nearest").values
-    else:
-        st.session_state.buffer_points = None
-
-    st.session_state.elevation_data = get_elevation()
-
+        
     return gdf
+
+#def 
+#    possibleXCols = ['longitude', 'lon', 'x', 'xcoord', 'east', 'easting', 'utme']
+#    possibleYCols = ['latitude', 'lat', 'y', 'ycoord', 'north', 'northing', 'utmn']
+#    xColIndex = 0
+#    yColIndex = 0
+
+#    for colname in st.session_state.well_columns:
+#        xColCond1 = colname.lower() in possibleXCols
+#        xColCond2 = str(colname).lower().startswith('x')
+#        if xColCond1 or xColCond2:
+#            xColIndex = colname
+#            continue
+
+#        yColCond1 = colname.lower() in possibleYCols
+#        yColCond2 = str(colname).lower().startswith('y')
+#        if yColCond1 or yColCond2:
+#            yColIndex = colname
+#            continue
+
+#    st.session_state.xcoord_col = xColIndex
+#    st.session_state.ycoord_col = yColIndex
+
+#    try:
+#        geocol = gpd.points_from_xy(wellDF[st.session_state.xcoord_col],
+#                                    wellDF[st.session_state.ycoord_col])
+
+#        gdf = gpd.GeoDataFrame(wellDF,
+#                               geometry=geocol,
+#                               crs=CRS_DICT[st.session_state.well_input_crs].code)
+#    except Exception:
+#        traceback.print_exc()
+#        gdf = None
+
+#    if gdf is not None:
+#        st.session_state.wellGDF = gdf.to_crs('EPSG:4326')
+
+#        if hasattr(st.session_state, "profile_buffer"):
+#            st.session_state.buffer_points = gpd.sjoin(left_df=gdf,
+#                                                       right_df=st.session_state.profile_buffer,
+#                                                       how="inner",
+#                                                       predicate="intersects")
+
+   #     if hasattr(st.session_state, 'elevation_data'):
+  #          xArr = xr.DataArray(st.session_state.buffer_points['LONGITUDE'].values, dims="points")
+ #           yArr = xr.DataArray(st.session_state.buffer_points["LATITUDE"].values, dims="points")
+#
+#            st.session_state.buffer_points['SURFACE_ELEVATION'] = st.session_state.elevation_data.sel(x=xArr, y=yArr, method="nearest").values
+#    else:
+#        st.session_state.buffer_points = None
+
+    #st.session_state.elevation_data = get_elevation()
+    
+    #return gdf
 
     #blocsdf = boreholeLoc_df[['API10', 'LONGITUDE', "LATITUDE"]]
     #downholeLocsDF = pd.merge(left=downhole_df, right=blocsdf, how='inner',left_on='api10', right_on='API10')
@@ -650,6 +774,111 @@ def ingest_table():
     #pvDF = pvDF[pvDF["LATITUDE"] < 42]
     #pvDF.plot(x='LONGITUDE', y="LATITUDE", kind='scatter', s=0.1, c='k')
 
+
+def plot_well_profile():
+    if hasattr(st.session_state, 'buffer_points') and 'SURFACE_ELEVATION' in st.session_state.buffer_points.columns:
+        df = st.session_state.buffer_points.copy()
+        termsDF = pd.read_csv(w4h.get_resources()['LithologyDict_Exact'])
+        df = w4h.specific_define(df, termsDF)
+        well_id_list = np.unique(st.session_state.buffer_points["API10"])
+        minElev = df["BOTTOM_ELEV"].quantile(0.05)
+        maxElev = max(df.loc[:, "SURFACE_ELEVATION"])
+        df = df.dropna(subset=['API10', "LONGITUDE", "LATITUDE", "FORMATION", "INTERPRETED"])
+
+        print("MINNMAX", minElev, maxElev)
+        eRange = abs(maxElev - minElev)
+        ePad = eRange * 0.05
+        yLIM = [minElev-ePad, maxElev+ePad]
+
+        # Get orientation
+        xmin = min(df["LONGITUDE"])
+        xmax = max(df["LONGITUDE"])
+        xReversed = xmin > xmax
+        xRange = abs(xmax - xmin)
+
+        ymin = min(df["LATITUDE"])
+        ymax = max(df["LATITUDE"])
+        yReversed = ymin > ymax
+        yRange = abs(ymax - ymin)
+
+        if yRange > xRange:
+            orientation = 'Y'
+            distCol = 'LATITUDE'
+            isReversed = yReversed
+        else:
+            orientation = 'X'
+            distCol = 'LONGITUDE'
+            isReversed = xReversed
+
+        def linetobox(x, y, width_factor=200):
+            linewidth = abs(xmax - xmin) / width_factor
+            #print(linewidth)
+            xlow = x[0]-linewidth
+            xhi = x[0]+linewidth
+
+            xReturn = [xlow, xlow, xhi, xhi, xlow]
+            yReturn = [y[1], y[0], y[0], y[1], y[1]]
+            return xReturn, yReturn
+
+
+        # Plot data
+        legendList = []
+        fig = go.Figure()
+        for index, row in df.iterrows():
+            #print(row, distCol)
+            xarr = [row[distCol], row[distCol]]
+            yarr = [row["TOP_ELEV"], row["BOTTOM_ELEV"]]
+
+            xboxarr, yboxarr = linetobox(xarr, yarr)
+            legendName = row['INTERPRETED']
+            showLegend = True
+            if row['INTERPRETED'] in legendList:
+                showLegend = False
+                
+            hoverText = f"Well: {row['API10']}<br>Formation: {row['FORMATION']}<br>Interpreted: {row['INTERPRETED']}"
+            print("HVRTEXT", hoverText)
+            # Define rectangle corners
+            try:
+                fColor = COLORMAPDICT[row["INTERPRETED"]]
+            except Exception:
+                fColor = 'black'
+
+            fig.add_trace(go.Scatter(
+                x=xboxarr,
+                y=yboxarr,
+                fill="toself",
+                fillcolor=fColor,
+                line=dict(color=None, width=0),
+                #linecolor=None,
+                mode='lines',
+                            
+                # Pattern fill
+                #fillpattern=dict(fgcolor='yellow',
+                #    shape=".",   # "/", "\\", "x", "-", "|", ".", "+"
+                #    bgcolor='black',
+                #    size=1,),
+                #hovertemplate=hoverText,
+                text=[hoverText] * 5,
+                #hovertemplate=(
+                #    "<b>Well:</b> %{customdata[0]}<br>"
+                #    "<b>Formation:</b> %{customdata[1]}<br>"
+                #    "<b>Interpreted:</b> %{customdata[2]}<br>"
+                #    "<extra></extra>"
+                #),
+                hoverinfo='text',
+                showlegend=showLegend,
+                name=legendName
+            ))
+            legendList.append(row["INTERPRETED"])
+        fig.update_yaxes(range=[minElev, maxElev])
+        fig.update_layout(hovermode='closest')
+
+        st.session_state.mapCol.plotly_chart(fig,
+                                             key='well_profile',
+                                            width='stretch',
+                                            config={'displayModeBar': True})
+        print(fig.data[0].hoverinfo)
+        print(fig.data[0].text)
+
 if __name__ == "__main__":
     main()
-    cached_elev_m = get_elevation()
