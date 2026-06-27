@@ -50,7 +50,7 @@ COLORMAPDICT = {'CLAY':'blue',
                 'GRAVEL':'darkgoldenrod', 
                 'SOIL':'black', 
                 'SAND AND GRAVEL':'darkorange', 
-                'UNKNOWN':'silver', 
+                'UNKNOWN':"rgba(0,0,0,0)", 
                 'CLAY AND SAND MIX':'greenyellow', 
                 'GENERIC':'gray', 
                 'SAND AND CLAY MIX':'greenyellow', 
@@ -84,97 +84,100 @@ def main():
         wellTab, st.session_state.tableTab, profileTab = st.tabs(["Wells", "Well Table", "Profile"])
 
         # Make columns in well tab
+        st.session_state.mapContainer = st.container()
+        
         wellincol, st.session_state.mapCol = wellTab.columns([0.5, 0.5])
 
         # Profile section
-        st.session_state.mapCol.header('Specify Profile', divider='rainbow')
-        pillCol, uploadCol, pCRSCol = st.session_state.mapCol.columns([0.2, 0.6, 0.2],)
-        pillCol.pills('Profile Input Type', options=['Upload', 'Selection'],
-                      default='Selection',
-                      on_change=profile_type_update,
-                      disabled=False, key='profile_type')
-        if st.session_state.profile_type == 'Upload':
-            uploadCol.file_uploader("Upload Profile Data",
-                                    key='profile_uploader',
-                                    on_change=ingest_profile)
-            pCRSCol.selectbox("Profile CRS",
-                              options=CRS_STR_LIST,
-                              index=DEFAULT_POINTS_CRS_INDEX,
-                              key='profile_crs')
-        else:
-            st.session_state.profile_crs = DEFAULT_POINTS_CRS
-            uploadCol.header("Use map to draw profile", text_alignment='right')
-        bSizeCol, bUnitCol, bEmptyCol = st.session_state.mapCol.columns([0.2, 0.2, 0.6])
-        bSizeCol.number_input("Buffer size", min_value=0.0, format="%0.1f",
-                              value=1.0,
-                              key='buffer_size')
-        bUnitCol.selectbox('Buffer Size Unit',
-                           options=['feet', 'meters', 'kilometers', 'miles'],
-                           index=2, key='buffer_unit')
-
-        # Well Data section
-        wellincol.header('Specify Well Data', divider='rainbow')
-        well_source = wellincol.pills("Well Data Source",
-                        options=['Table upload', 'Database'],
-                        default='Database',
-                        key='well_source')
-        
-        if st.session_state.well_source == 'Table upload':
-            wellincol.file_uploader("Upload Well Data",
-                                key='well_uploader', on_change=ingest_table)
-        else:
-            st.session_state.wellGDF = wellGDF = ingest_table(well_source)
-            print("TTYPES", type(st.session_state.wellGDF), type(wellGDF))
-            if st.session_state.wellGDF is not None:
-                st.session_state.tableTab.dataframe(st.session_state.wellGDF.to_arrow(geometry_encoding='geoarrow'))
+        with st.sidebar:
+            st.header('Specify Profile', divider='rainbow')
+            pillCol, uploadCol, pCRSCol = st.columns([0.2, 0.6, 0.2],)
+            pillCol.pills('Profile Input Type', options=['Upload', 'Selection'],
+                        default='Selection',
+                        on_change=profile_type_update,
+                        disabled=False, key='profile_type')
+            if st.session_state.profile_type == 'Upload':
+                uploadCol.file_uploader("Upload Profile Data",
+                                        key='profile_uploader',
+                                        on_change=ingest_profile)
+                pCRSCol.selectbox("Profile CRS",
+                                options=CRS_STR_LIST,
+                                index=DEFAULT_POINTS_CRS_INDEX,
+                                key='profile_crs')
             else:
-                st.session_state.tableTab.write("Point table not read in correctly")
-        xcol, ycol, crscol = wellincol.columns([0.3, 0.3, 0.6])
+                st.session_state.profile_crs = DEFAULT_POINTS_CRS
+                uploadCol.header("Use map to draw profile", text_alignment='right')
+            bSizeCol, bUnitCol, bEmptyCol = st.columns([0.2, 0.2, 0.6])
+            bSizeCol.number_input("Buffer size", min_value=0.0, format="%0.1f",
+                                value=1.0,
+                                key='buffer_size')
+            bUnitCol.selectbox('Buffer Size Unit',
+                            options=['feet', 'meters', 'kilometers', 'miles'],
+                            index=2, key='buffer_unit')
 
-        colDisabled = False
-        if not hasattr(st.session_state, "well_columns"):
-            st.session_state.well_columns = []
-            colDisabled = True
-        
-        xcol.selectbox('X Coordinate Column', key='xcoord_col',
-                       options=st.session_state.well_columns,
-                       disabled=colDisabled)
-        ycol.selectbox('Y Coordinate Column', key='ycoord_col',
-                       options=st.session_state.well_columns,
-                       disabled=colDisabled)
+            # Well Data section
+            st.header('Specify Well Data', divider='rainbow')
+            well_source = st.pills("Well Data Source",
+                            options=['Table upload', 'Database'],
+                            default='Database',
+                            key='well_source')
+            
+            if st.session_state.well_source == 'Table upload':
+                st.file_uploader("Upload Well Data",
+                                    key='well_uploader', on_change=ingest_table)
+            else:
+                st.session_state.wellGDF = wellGDF = ingest_table(well_source)
+                print("TTYPES", type(st.session_state.wellGDF), type(wellGDF))
+                if st.session_state.wellGDF is not None:
+                    st.session_state.tableTab.dataframe(st.session_state.wellGDF.to_arrow(geometry_encoding='geoarrow'))
+                else:
+                    st.session_state.tableTab.write("Point table not read in correctly")
+            xcol, ycol, crscol = st.columns([0.3, 0.3, 0.6])
 
-        crscol.selectbox(label="Well Coordinates CRS", options=CRS_STR_LIST,
-                         index=DEFAULT_POINTS_CRS_INDEX,
-                         key='well_input_crs')
-        wellincol.toggle('Plot Well Points',
-                         value=False,
-                         key='plot_points_toggle',
-                         disabled=colDisabled,
-                         on_change=plot_well_points)
-        
-        # Elevation input
-        wellincol.header('Elevation', divider='rainbow')
-        eSourceCol, eSpecCol = wellincol.columns([0.4, 0.6],
-                                                 vertical_alignment='bottom')
-        eSourceCol.pills('Elevation Source',
-                         options=["Input table",
-                                 "Global dataset (GMRT)",
-                                 "Illinois lidar"],
-                         default='Illinois lidar', key='elev_source')
-        eSource = st.session_state.elev_source
-        if eSource == 'Illinois lidar':
-            eSpecCol.write('Using ISGS statewide lidar dataset.')
-            st.session_state.raster_crs = "EPSG:3857 - WGS 84 / Pseudo-Mercator"
-        elif eSource == 'Input table':
-            eColOpts = []
-            if hasattr(st.session_state, 'well_columns'):
-                eColOpts = st.session_state.well_columns
-            eSpecCol.selectbox("Specify Elevation Column",
-                               options=eColOpts)
-        else:
-            eSpecCol.write('Using Global Multiresolution Topography dataset.')
+            colDisabled = False
+            if not hasattr(st.session_state, "well_columns"):
+                st.session_state.well_columns = []
+                colDisabled = True
+            
+            xcol.selectbox('X Coordinate Column', key='xcoord_col',
+                        options=st.session_state.well_columns,
+                        disabled=colDisabled)
+            ycol.selectbox('Y Coordinate Column', key='ycoord_col',
+                        options=st.session_state.well_columns,
+                        disabled=colDisabled)
 
-        with st.session_state.mapCol:
+            crscol.selectbox(label="Well Coordinates CRS", options=CRS_STR_LIST,
+                            index=DEFAULT_POINTS_CRS_INDEX,
+                            key='well_input_crs')
+            st.toggle('Plot Well Points',
+                            value=False,
+                            key='plot_points_toggle',
+                            disabled=colDisabled,
+                            on_change=plot_well_points)
+            
+            # Elevation input
+            st.header('Elevation', divider='rainbow')
+            eSourceCol, eSpecCol = st.columns([0.4, 0.6],
+                                                    vertical_alignment='bottom')
+            eSourceCol.pills('Elevation Source',
+                            options=["Input table",
+                                    "Global dataset (GMRT)",
+                                    "Illinois lidar"],
+                            default='Illinois lidar', key='elev_source')
+            eSource = st.session_state.elev_source
+            if eSource == 'Illinois lidar':
+                eSpecCol.write('Using ISGS statewide lidar dataset.')
+                st.session_state.raster_crs = "EPSG:3857 - WGS 84 / Pseudo-Mercator"
+            elif eSource == 'Input table':
+                eColOpts = []
+                if hasattr(st.session_state, 'well_columns'):
+                    eColOpts = st.session_state.well_columns
+                eSpecCol.selectbox("Specify Elevation Column",
+                                options=eColOpts)
+            else:
+                eSpecCol.write('Using Global Multiresolution Topography dataset.')
+
+        with st.session_state.mapContainer:
             if "current_profile" not in st.session_state:
                 st.session_state.current_profile = None
             if "new_map_draw" not in st.session_state:
@@ -212,22 +215,67 @@ def draw_base_map(map=None):
     else:
         m = map
     # Add elevation basemap
-    #lidarUrl = IL_LIDAR_URL.split('?request')[0]
-    #folium.WmsTileLayer(
-    #    url=lidarUrl,
-    #    name="IL Statewide LiDAR DEM",
-    #    layers="None",
-    #    styles="",
-    #    fmt="image/png",
-    #    version="1.3.0",
-    #    transparent=True,
-    #    attr="Illinois State Geological Survey",
-    #    overlay=True,
-    #    control=True,
-    #    # NO crs= here
-    #).add_to(_map)
+    lidarUrl = IL_LIDAR_URL.split('?request')[0]
+    folium.WmsTileLayer(
+        url=lidarUrl,
+        name="IL Statewide LiDAR DEM",
+        layers="None",
+        styles="",
+        fmt="image/png",
+        version="1.3.0",
+        transparent=True,
+        attr="Illinois State Geological Survey",
+        overlay=True,
+        control=True,
+        show=False,
+    ).add_to(m)
 
     if hasattr(st.session_state, 'profile_buffer') and isinstance(st.session_state.profile_buffer, gpd.GeoDataFrame):
+        bpDF = st.session_state.buffer_points.copy()
+        uniqueWells = np.unique(bpDF['API10'])
+        plotDFList = []
+        geomList = []
+        for well in uniqueWells:
+            uWellDF = bpDF[bpDF['API10']==well]
+            uWellX = uWellDF['LONGITUDE'].iloc[0]
+            uWellY = uWellDF['LATITUDE'].iloc[0]
+            uWellDepth = str(max(uWellDF['BOTTOM'])) + "'"
+            #uWellBottomElev = str(round(min(uWellDF['BOTTOM_ELEV']), 2)) + "' asl"
+            geomList.append(uWellDF.geometry.iloc[0])
+            plotDFList.append([well, uWellX, uWellY, uWellDepth])
+        colList = ['API10', 'LONGITUDE', "LATITUDE", "DEPTH"]
+        folium.GeoJson(
+            gpd.GeoDataFrame(plotDFList, columns=colList, geometry=geomList, crs=4269),
+            name='Selected Wells',
+            style_function=lambda x: {
+                "color": "black",
+                "weight": 0,
+                "interactive": True,
+                "fillOpacity": 0.85,
+            },
+
+            marker=folium.CircleMarker(
+                radius=2,
+                color='black',
+                fill=True,
+                fill_color='black',
+            ),
+
+            tooltip=folium.GeoJsonTooltip(
+                fields=["API10", "LONGITUDE", "LATITUDE", 'DEPTH'],
+                aliases=["Well:", "Longitude:", "Latitude:", 'Total Depth:'],
+                style=(
+                    "background-color: white; "
+                    "border: 1px solid black; "
+                    "border-radius: 3px; "
+                    "box-shadow: 3px;"
+                ),
+                localize=True,
+                sticky=False
+            )
+        ).add_to(m)
+
+        profile_group = folium.FeatureGroup(name="Current Profile", show=True)
         folium.GeoJson(
             st.session_state.profile_buffer,
             name="Profile Buffer",
@@ -237,22 +285,24 @@ def draw_base_map(map=None):
                 "weight": 0, 'interactive': False,
                 "fillOpacity": 0.1,
             }
-        ).add_to(m)
+        ).add_to(profile_group)
 
         folium.PolyLine(
             locations=[(lon, lat) for lon, lat in st.session_state.current_profile.coords],
             name="Current Profile",
-            color='black', interactive=False,
+            color='black', 
+            interactive=True,
             weight=3,
-        ).add_to(m)
-
+            control=True,
+            show=True,
+        ).add_to(profile_group)
+        profile_group.add_to(m)
         bounds = st.session_state.profile_buffer.total_bounds
 
         m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]],
                      padding=[50, 50])
 
     wellPlotCond = hasattr(st.session_state, 'do_plot_wells') and st.session_state.do_plot_wells
-    print("WELLPLOTCOND", wellPlotCond)
     if wellPlotCond:
         if hasattr(st.session_state, 'buffer_points') and st.session_state.buffer_points is not None:
             #folium.Marker().add_to(m)
@@ -293,19 +343,20 @@ def draw_base_map(map=None):
 
         if df is not None and "ELEVATION" not in df.columns:
             if not hasattr(st.session_state, 'elevation_data'):
-                print('We dont even exist!')
+                #print('We dont even exist!')
                 st.session_state.elevation_data = get_elevation(st.session_state.elev_source)
             elif st.session_state.elevation_data is None:
-                print("NONE FIRST")
+                #print("NONE FIRST")
                 st.session_state.elevation_data = get_elevation(st.session_state.elev_source)
                 elevData = get_elevation(st.session_state.elev_source)
-                print('We noned')
-                print("LOCAL elevData", type(elevData))
-                print("STSS elevation_data", type(st.session_state.elevation_data))
+                #print('We noned')
+                #print("LOCAL elevData", type(elevData))
+                #print("STSS elevation_data", type(st.session_state.elevation_data))
             else:
-                print('We elsed')
-                print(type(st.session_state.elevation_data))
-                print(st.session_state.elevation_data)
+                pass
+                #print('We elsed')
+                #print(type(st.session_state.elevation_data))
+                #print(st.session_state.elevation_data)
             xs = xr.DataArray(df["LONGITUDE"].values, dims="points")
             ys = xr.DataArray(df["LATITUDE"].values, dims="points")
 
@@ -319,7 +370,7 @@ def draw_base_map(map=None):
             df["BOTTOM_ELEV"] = df['SURFACE_ELEVATION'] - df["BOTTOM"]
             df["TOP_ELEV"] = df['SURFACE_ELEVATION'] - df["TOP"]
 
-            plot_well_profile()                
+            plot_well_profile()
         
     # Show the draw tool
     Draw(
@@ -345,7 +396,7 @@ def draw_base_map(map=None):
     #        color="red",
     #        weight=3,
     #    ).add_to(fg)
-    with st.session_state.mapCol:
+    with st.session_state.mapContainer:
         st_folium(m,
             #feature_group_to_add=fg,
             use_container_width=True,
@@ -824,6 +875,28 @@ def plot_well_profile():
         # Plot data
         legendList = []
         fig = go.Figure()
+        for well in well_id_list:
+            wellDF = df[df['API10'] == well].reset_index(drop=True)
+            #print(wellDF[distCol])
+
+            if len(wellDF[distCol]) > 0:
+                minWellElev = min(wellDF["BOTTOM_ELEV"])
+                maxWellElev = max(wellDF["TOP_ELEV"])
+                wellX = wellDF[distCol].iloc[0]
+
+                fig.add_trace(go.Scatter(
+                    x=[wellX, wellX],
+                    y=[minWellElev, maxWellElev],
+                    #fill="toself",
+                    #fillcolor=fColor,
+                    line=dict(color='black', width=2, dash="3px 1px"),
+                    marker=dict(size=4, line=dict(width=1, color='black'), symbol='line-ew'),
+                    mode='markers+lines',
+                    hoverinfo='skip',
+                    showlegend=False,
+                    name=well
+                ))
+        
         for index, row in df.iterrows():
             #print(row, distCol)
             xarr = [row[distCol], row[distCol]]
@@ -878,7 +951,7 @@ def plot_well_profile():
         fig.update_yaxes(range=[minElev, maxElev])
         fig.update_layout(hovermode='closest')
 
-        st.session_state.mapCol.plotly_chart(fig,
+        st.session_state.mapContainer.plotly_chart(fig,
                                              key='well_profile',
                                             width='stretch',
                                             config={'displayModeBar': True})
