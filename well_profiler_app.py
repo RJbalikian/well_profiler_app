@@ -1,4 +1,5 @@
 from io import BytesIO
+import json
 import pathlib
 import traceback
 
@@ -45,28 +46,13 @@ DEFAULT_POINTS_CRS_INDEX = CRS_STR_LIST.index(DEFAULT_POINTS_CRS)
 DEFAULT_OUTPUT_CRS = DEFAULT_POINTS_CRS
 
 
-COLORMAPDICT = {'CLAY':'blue', 
-                'BEDROCK':'purple', 
-                'SAND':'gold', 
-                'GRAVEL':'darkgoldenrod', 
-                'SOIL':'black', 
-                'SAND AND GRAVEL':'darkorange', 
-                'UNKNOWN':"rgba(0,0,0,0)", 
-                'CLAY AND SAND MIX':'greenyellow', 
-                'GENERIC':'gray', 
-                'SAND AND CLAY MIX':'greenyellow', 
-                'CLAY AND GRAVEL MIX':'olive', 
-                'BEDROCK AND OTHER':'lavender', 
-                'ORGANIC MATERIAL':'black', 
-                'CLAY WITH SAND SEAMS':'greenyellow', 
-                'BOULDERY MATERIAL':'indigo', 
-                'FILL':'gray', 
-                'SILT':'lawngreen', 
-                'GRAVEL AND CLAY MIX':'olive', 
-                'SAND WITH CLAY SEAMS':'greenyellow', 
-                'BOULDER MATERIAL':'indigo', 
-                'CLAY WITH GRAVEL SEAMS':'olive', 
-                'GRAVEL WITH CLAY SEAMS':'olive'}
+with open('thomason_colors.json', 'r') as jf:
+    COLORMAPDICT = json.load(jf)
+
+#with open('plotly_colors.json', 'r') as jf:
+#    COLORMAPDICT = json.load(jf)
+
+
 COLORDF = pd.DataFrame(COLORMAPDICT, index=['Color']).T.reset_index()
 COLORDF.columns = ['INTERPRETED', "PLOTCOLOR"]
 

@@ -1,0 +1,22 @@
+{
+ "BEDROCK": "rgb(255,192,203)",
+ "BOULDERY MATERIAL": "rgb(255,105,180)",
+ "CLAY": "rgb(0,0,255)",
+ "CLAY AND GRAVEL": "rgb(30,144,255)",
+ "CLAY AND SAND": "rgb(95,158,160)",
+ "DOLOMITE": "rgb(255,255,240)",
+ "FILL": "rgb(128,0,0)",
+ "GRAVEL": "rgb(255,0,0)",
+ "GRAVEL AND CLAY": "rgb(135,206,235)",
+ "LIMESTONE": "rgb(245,245,245)",
+ "ORGANIC MATERIAL": "rgb(0,0,0)",
+ "SAND": "rgb(255,255,0)",
+ "SAND AND CLAY": "rgb(154,205,50)",
+ "SAND AND GRAVEL": "rgb(255,165,0)",
+ "SANDSTONE": "rgb(240,230,140)",
+ "SHALE": "rgb(112,128,144)",
+ "SILT": "rgb(0,128,0)",
+ "SOIL": "rgb(105,105,105)",
+ "UNKOWN": "rgb(211,211,211)",
+ "NULL": "rgb(191,191,191)"
+}
