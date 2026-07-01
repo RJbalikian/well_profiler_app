@@ -2,9 +2,12 @@ rioxarray
 pandas
 folium
 streamlit-folium
+nbformat
 owslib
 pyproj
 geopandas
 matplotlib
 plotly
+pyodbc
+sqlalchemy
 wells4hydrogeology

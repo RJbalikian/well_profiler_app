@@ -25,6 +25,7 @@ import xarray as xr
 
 st.set_page_config(page_title='Well Profiler App',
                    page_icon=':material/full_stacked_bar_chart:',
+                   initial_sidebar_state="collapsed",   
                    layout='wide')
 
 CRS_LIST = pyproj.database.query_crs_info()
@@ -70,141 +71,177 @@ COLORDF = pd.DataFrame(COLORMAPDICT, index=['Color']).T.reset_index()
 COLORDF.columns = ['INTERPRETED', "PLOTCOLOR"]
 
 def main():
+    # Make tabs in main container
+    wellTab, st.session_state.tableTab, profileTab = st.tabs(["Wells", "Well Table", "Profile"])
 
-    with st.container(width='stretch', height='stretch'):
-        titleCol, projCol, menuCol, tCol = st.columns([0.35, 0.1, 0.05, 0.5],
-                                                  vertical_alignment='bottom')
-        titleCol.title('Well Profiler')
-        projCol.selectbox(label="Project CRS", options=CRS_STR_LIST,
-                          index=DEFAULT_POINTS_CRS_INDEX,
-                          key='project_crs')
-        menuCol.menu_button('TestMenu', options=['OPTION 1', 'option 2'])
-
-        # Make tabs in main container
-        wellTab, st.session_state.tableTab, profileTab = st.tabs(["Wells", "Well Table", "Profile"])
-
-        # Make columns in well tab
-        st.session_state.mapContainer = st.container()
-        
-        wellincol, st.session_state.mapCol = wellTab.columns([0.5, 0.5])
+    # Make columns in well tab
+    st.session_state.mapContainer = st.container()
+    
 
         # Profile section
-        with st.sidebar:
-            st.header('Specify Profile', divider='rainbow')
-            pillCol, uploadCol, pCRSCol = st.columns([0.2, 0.6, 0.2],)
-            pillCol.pills('Profile Input Type', options=['Upload', 'Selection'],
-                        default='Selection',
-                        on_change=profile_type_update,
-                        disabled=False, key='profile_type')
-            if st.session_state.profile_type == 'Upload':
-                uploadCol.file_uploader("Upload Profile Data",
-                                        key='profile_uploader',
-                                        on_change=ingest_profile)
-                pCRSCol.selectbox("Profile CRS",
-                                options=CRS_STR_LIST,
-                                index=DEFAULT_POINTS_CRS_INDEX,
-                                key='profile_crs')
-            else:
-                st.session_state.profile_crs = DEFAULT_POINTS_CRS
-                uploadCol.header("Use map to draw profile", text_alignment='right')
-            bSizeCol, bUnitCol, bEmptyCol = st.columns([0.2, 0.2, 0.6])
-            bSizeCol.number_input("Buffer size", min_value=0.0, format="%0.1f",
-                                value=1.0,
-                                key='buffer_size')
-            bUnitCol.selectbox('Buffer Size Unit',
-                            options=['feet', 'meters', 'kilometers', 'miles'],
-                            index=2, key='buffer_unit')
+    with st.sidebar:
+        titleCol, emptyCol, menuCol, tCol = st.columns([0.35, 0.1, 0.05, 0.5],
+                                                  vertical_alignment='bottom')
+        titleCol.title('Well Profiler')
+        menuCol.menu_button('TestMenu', options=['OPTION 1', 'option 2'])
 
-            # Well Data section
-            st.header('Specify Well Data', divider='rainbow')
-            well_source = st.pills("Well Data Source",
-                            options=['Table upload', 'Database'],
-                            default='Database',
-                            key='well_source')
-            
-            if st.session_state.well_source == 'Table upload':
-                st.file_uploader("Upload Well Data",
-                                    key='well_uploader', on_change=ingest_table)
-            else:
-                st.session_state.wellGDF = wellGDF = ingest_table(well_source)
-                print("TTYPES", type(st.session_state.wellGDF), type(wellGDF))
-                if st.session_state.wellGDF is not None:
-                    st.session_state.tableTab.dataframe(st.session_state.wellGDF.to_arrow(geometry_encoding='geoarrow'))
-                else:
-                    st.session_state.tableTab.write("Point table not read in correctly")
-            xcol, ycol, crscol = st.columns([0.3, 0.3, 0.6])
 
-            colDisabled = False
-            if not hasattr(st.session_state, "well_columns"):
-                st.session_state.well_columns = []
-                colDisabled = True
-            
-            xcol.selectbox('X Coordinate Column', key='xcoord_col',
-                        options=st.session_state.well_columns,
-                        disabled=colDisabled)
-            ycol.selectbox('Y Coordinate Column', key='ycoord_col',
-                        options=st.session_state.well_columns,
-                        disabled=colDisabled)
-
-            crscol.selectbox(label="Well Coordinates CRS", options=CRS_STR_LIST,
+        st.header('Specify Profile', divider='rainbow')
+        pillCol, uploadCol, pCRSCol = st.columns([0.2, 0.6, 0.2],)
+        pillCol.pills('Profile Input Type', options=['Upload', 'Selection'],
+                    default='Selection',
+                    on_change=profile_type_update,
+                    disabled=False, key='profile_type')
+        if st.session_state.profile_type == 'Upload':
+            uploadCol.file_uploader("Upload Profile Data",
+                                    key='profile_uploader',
+                                    on_change=ingest_profile)
+            pCRSCol.selectbox("Profile CRS",
+                            options=CRS_STR_LIST,
                             index=DEFAULT_POINTS_CRS_INDEX,
-                            key='well_input_crs')
-            st.toggle('Plot Well Points',
-                            value=False,
-                            key='plot_points_toggle',
-                            disabled=colDisabled,
-                            on_change=plot_well_points)
-            
-            # Elevation input
-            st.header('Elevation', divider='rainbow')
-            eSourceCol, eSpecCol = st.columns([0.4, 0.6],
-                                                    vertical_alignment='bottom')
-            eSourceCol.pills('Elevation Source',
-                            options=["Input table",
-                                    "Global dataset (GMRT)",
-                                    "Illinois lidar"],
-                            default='Illinois lidar', key='elev_source')
-            eSource = st.session_state.elev_source
-            if eSource == 'Illinois lidar':
-                eSpecCol.write('Using ISGS statewide lidar dataset.')
-                st.session_state.raster_crs = "EPSG:3857 - WGS 84 / Pseudo-Mercator"
-            elif eSource == 'Input table':
-                eColOpts = []
-                if hasattr(st.session_state, 'well_columns'):
-                    eColOpts = st.session_state.well_columns
-                eSpecCol.selectbox("Specify Elevation Column",
-                                options=eColOpts)
+                            key='profile_crs')
+        else:
+            st.session_state.profile_crs = DEFAULT_POINTS_CRS
+            uploadCol.header("Use map to draw profile", text_alignment='right')
+
+
+        # Well Data section
+        st.header('Specify Well Data', divider='rainbow')
+        well_source = st.pills("Well Data Source",
+                        options=['Table upload', 'Database'],
+                        default='Database',
+                        key='well_source')
+        
+        if st.session_state.well_source == 'Table upload':
+            st.file_uploader("Upload Well Data",
+                                key='well_uploader', on_change=ingest_table)
+        else:
+            st.session_state.wellGDF = wellGDF = ingest_table(well_source)
+            print("TTYPES", type(st.session_state.wellGDF), type(wellGDF))
+            if st.session_state.wellGDF is not None:
+                st.session_state.tableTab.dataframe(st.session_state.wellGDF.to_arrow(geometry_encoding='geoarrow'))
             else:
-                eSpecCol.write('Using Global Multiresolution Topography dataset.')
+                st.session_state.tableTab.write("Point table not read in correctly")
+        xcol, ycol, crscol = st.columns([0.3, 0.3, 0.6])
 
-        with st.session_state.mapContainer:
-            if "current_profile" not in st.session_state:
-                st.session_state.current_profile = None
-            if "new_map_draw" not in st.session_state:
-                st.session_state.new_map_draw = False
-            if 'map_result' not in st.session_state:
-                st.session_state.map_result = {'last_active_drawing': None}
+        colDisabled = False
+        if hasattr(st.session_state, "wellGDF") and st.session_state.wellGDF is not None:
+            st.session_state.well_columns = st.session_state.wellGDF.columns
 
-            if not st.session_state.new_map_draw:
-                print("DRAWING BASE MAP")
-                draw_base_map()
-                st.session_state.new_map_draw = False
-            else:
-                m = folium.Map(
-                    location=[40.0, -89.0],
-                    zoom_start=7,
-                    )
-                folium.PolyLine(
-                    locations=[(lat, lon) for lon, lat in st.session_state.current_profile.coords],  # flip to (lat, lon)
-                    color="blue",
-                    weight=3,
-                    opacity=0.8,
-                    tooltip="Current Profile",
-                    popup="Current Profile",
-                ).add_to(m)
+        if not hasattr(st.session_state, "well_columns"):
+            st.session_state.well_columns = []
+            colDisabled = True
+        
+        potXCol = ['x', 'longitude', 'easting', 'east', 'utme', 'utmeast', 'lon', 'long']
+        potYCol = ['y', 'latitude', 'northing', 'north', 'utmn', 'utnorth', 'lat']
+        lccols = [str(col).lower() for col in st.session_state.well_columns]
+        xIndex = 0
+        yIndex = 0
+        for x in potXCol:
+            if x in lccols:
+                xIndex = lccols.index(x)
+        for y in potYCol:
+            if y in lccols:
+                yIndex = lccols.index(y)
 
-                draw_base_map(map=m)
-                st.session_state.new_map_draw = True
+        xcol.selectbox('X Coordinate Column', key='xcoord_col',
+                    options=list(st.session_state.well_columns),
+                    disabled=colDisabled, index=xIndex)
+        ycol.selectbox('Y Coordinate Column', key='ycoord_col',
+                    options=list(st.session_state.well_columns),
+                    disabled=colDisabled, index=yIndex)
+
+        crscol.selectbox(label="Well Coordinates CRS", options=CRS_STR_LIST,
+                        index=DEFAULT_POINTS_CRS_INDEX,
+                        key='well_input_crs')
+        st.toggle('Plot Well Points',
+                        value=False,
+                        key='plot_points_toggle',
+                        disabled=colDisabled,
+                        on_change=plot_well_points)
+        
+        # Elevation input
+        st.header('Elevation', divider='rainbow')
+        eSourceCol, eSpecCol = st.columns([0.4, 0.6],
+                                                vertical_alignment='bottom')
+        eSourceCol.pills('Elevation Source',
+                        options=["Input table",
+                                 'Table column',
+                                "Global dataset (GMRT)",
+                                "Illinois lidar"],
+                        default='Illinois lidar', key='elev_source')
+        eSource = st.session_state.elev_source
+        if eSource == 'Illinois lidar':
+            eSpecCol.write('Using ISGS statewide lidar dataset.')
+            st.session_state.raster_crs = "EPSG:3857 - WGS 84 / Pseudo-Mercator"
+            inputElevIndex = 0
+            inputElevDisabled = True
+        elif eSource in ['Input table', 'Table column']:
+            eColOpts = []
+            eSpecIndex = 0
+            if hasattr(st.session_state, 'well_columns'):
+                eColOpts = list(st.session_state.well_columns)
+                eColLC = [item.lower() for item in eColOpts]
+                for potentialElevCol in ['elevation', 'elev', 'surface_elevation', 'z', 'topo', 'topography']:
+                    if potentialElevCol in eColLC:
+                        eSpecIndex = eColLC.index(potentialElevCol)
+            eSpecCol.selectbox("Specify Elevation Column",
+                            options=eColOpts, index=eSpecIndex,
+                            disabled=colDisabled)
+            inputElevDisabled = False
+            inputElevIndex = 0
+        else:
+            eSpecCol.write('Using Global Multiresolution Topography dataset.')
+            inputElevIndex = 1
+            inputElevDisabled = True
+        st.selectbox("Input Elevation Unit", options=['feet', 'meters'], 
+                     disabled=inputElevDisabled,
+                     index=inputElevIndex,
+                     key='elev_unit_in')
+
+    with st.session_state.mapContainer:
+        bSizeCol, bUnitCol, elevUnitCol, showElevCol, projCol = st.columns([0.1, 0.2, 0.2, 0.1, 0.3])
+        bSizeCol.number_input("Buffer size", min_value=0.0, format="%0.1f",
+                            value=1.0,on_change=make_profiles,
+                            key='buffer_size')
+        bUnitCol.selectbox('Buffer Size Unit',
+                           options=['feet', 'meters', 'kilometers', 'miles'],
+                           index=2, key='buffer_unit')
+        showElevCol.checkbox('Show Elevation', value=True,key='show_surf_elev')
+        elevUnitCol.selectbox('Plot Elevation Unit',
+                                options=['feet', 'meters'],
+                                index=0, key='plot_elev_unit')
+        projCol.selectbox(label="Plot CRS", options=CRS_STR_LIST,
+                    index=DEFAULT_POINTS_CRS_INDEX,
+                    key='plot_crs')
+        if "current_profile" not in st.session_state:
+            st.session_state.current_profile = None
+        if "new_map_draw" not in st.session_state:
+            st.session_state.new_map_draw = False
+        if 'map_result' not in st.session_state:
+            st.session_state.map_result = {'last_active_drawing': None}
+
+        if not st.session_state.new_map_draw:
+            print("DRAWING BASE MAP")
+            draw_base_map()
+            st.session_state.new_map_draw = False
+        else:
+            m = folium.Map(
+                location=[40.0, -89.0],
+                zoom_start=7,
+                )
+            folium.PolyLine(
+                locations=[(lat, lon) for lon, lat in st.session_state.current_profile.coords],  # flip to (lat, lon)
+                color="blue",
+                weight=3,
+                opacity=0.8,
+                tooltip="Current Profile",
+                popup="Current Profile",
+            ).add_to(m)
+
+            draw_base_map(map=m)
+            st.session_state.new_map_draw = True
+
 
 def draw_base_map(map=None):
     if map is None:
@@ -319,7 +356,7 @@ def draw_base_map(map=None):
 
     county_group.add_to(m)
 
-    folium.LayerControl().add_to(m)
+    #folium.LayerControl().add_to(m)
 
     # Get PLSS Townships
     BASE_URL = r"https://services2.arcgis.com/FiaPA4ga0iQKduv3/arcgis/rest/services/Public_Land_Survey_System_view/FeatureServer/0/query"
@@ -354,7 +391,7 @@ def draw_base_map(map=None):
     #folium.LayerControl().add_to(m)
 
 
-    if hasattr(st.session_state, 'profile_buffer') and isinstance(st.session_state.profile_buffer, gpd.GeoDataFrame):
+    if hasattr(st.session_state, 'profile_buffer') and isinstance(st.session_state.profile_buffer, gpd.GeoDataFrame) and hasattr(st.session_state, 'buffer_points'):
         bpDF = st.session_state.buffer_points.copy()
         uniqueWells = np.unique(bpDF['API10'])
         plotDFList = []
@@ -426,6 +463,32 @@ def draw_base_map(map=None):
         m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]],
                      padding=[50, 50])
 
+
+    # Show the draw tool
+    Draw(
+        export=False,
+        draw_options={
+            "polyline": {"shapeOptions": {"color": "red", "weight": 3}},
+            "polygon": False,
+            "rectangle": False,
+            "circle": False,
+            "circlemarker": False,
+            "marker": False,
+        },
+        edit_options={"edit": True, "remove": True},
+    ).add_to(m)
+
+    folium.LayerControl(collapsed=False).add_to(m)
+
+    #fg = folium.FeatureGroup(name="Current Line")
+
+    #if st.session_state.current_profile:
+    #    folium.PolyLine(
+    #        locations=[(lat, lon) for lon, lat in st.session_state.current_profile],
+    #        color="red",
+    #        weight=3,
+    #    ).add_to(fg)
+
     wellPlotCond = hasattr(st.session_state, 'do_plot_wells') and st.session_state.do_plot_wells
     if wellPlotCond:
         if hasattr(st.session_state, 'buffer_points') and st.session_state.buffer_points is not None:
@@ -459,28 +522,31 @@ def draw_base_map(map=None):
                 ).add_to(m)
             print('done')
 
+
     # Plot profile!!
     if hasattr(st.session_state, "buffer_points"):
         df = st.session_state.buffer_points
         if not hasattr(st.session_state, "elevation_data"):
+            print('profplot 468 get elevation')
             st.session_state.elevation_data = get_elevation(st.session_state.elev_source)
 
-        if df is not None and "ELEVATION" not in df.columns:
+        if df is not None and "SURFACE_ELEVATION" not in df.columns:
             if not hasattr(st.session_state, 'elevation_data'):
-                #print('We dont even exist!')
+                print('We dont even exist!')
                 st.session_state.elevation_data = get_elevation(st.session_state.elev_source)
             elif st.session_state.elevation_data is None:
                 #print("NONE FIRST")
                 st.session_state.elevation_data = get_elevation(st.session_state.elev_source)
                 elevData = get_elevation(st.session_state.elev_source)
-                #print('We noned')
-                #print("LOCAL elevData", type(elevData))
-                #print("STSS elevation_data", type(st.session_state.elevation_data))
+                print('We noned')
+                print("LOCAL elevData", type(elevData))
+                print("STSS elevation_data", type(st.session_state.elevation_data))
             else:
                 pass
-                #print('We elsed')
-                #print(type(st.session_state.elevation_data))
-                #print(st.session_state.elevation_data)
+                print('We elsed')
+                print(type(st.session_state.elevation_data))
+                print(st.session_state.elevation_data)
+            print("485 draw base map sampling elv")
             xs = xr.DataArray(df["LONGITUDE"].values, dims="points")
             ys = xr.DataArray(df["LATITUDE"].values, dims="points")
 
@@ -494,39 +560,17 @@ def draw_base_map(map=None):
             df["BOTTOM_ELEV"] = df['SURFACE_ELEVATION'] - df["BOTTOM"]
             df["TOP_ELEV"] = df['SURFACE_ELEVATION'] - df["TOP"]
 
+
             plot_well_profile()
-        
-    # Show the draw tool
-    Draw(
-        export=False,
-        draw_options={
-            "polyline": {"shapeOptions": {"color": "red", "weight": 3}},
-            "polygon": False,
-            "rectangle": False,
-            "circle": False,
-            "circlemarker": False,
-            "marker": False,
-        },
-        edit_options={"edit": True, "remove": True},
-    ).add_to(m)
 
-    folium.LayerControl(collapsed=False).add_to(m)
+    #print("WE DOING THIS or what?", m)
+    st_folium(m,
+        #feature_group_to_add=fg,
+        use_container_width=True,
+        on_change=check_map_drawings,
+        returned_objects=['last_active_drawing'],
+        key='map_result')
 
-    #fg = folium.FeatureGroup(name="Current Line")
-
-    #if st.session_state.current_profile:
-    #    folium.PolyLine(
-    #        locations=[(lat, lon) for lon, lat in st.session_state.current_profile],
-    #        color="red",
-    #        weight=3,
-    #    ).add_to(fg)
-    with st.session_state.mapContainer:
-        st_folium(m,
-            #feature_group_to_add=fg,
-            use_container_width=True,
-            on_change=check_map_drawings,
-            returned_objects=['last_active_drawing'],
-            key='map_result')
 
 def check_map_drawings():
     print("CHECKING MAP DRAWINGS!!")
@@ -538,13 +582,14 @@ def check_map_drawings():
     st.session_state.current_profile = LineString([[lat, lon] for lon, lat in coords])
     make_profiles()
 
-    if hasattr(st.session_state, "profile_buffer") and hasattr(st.session_state, "wellGDF"):
+    if hasattr(st.session_state, "profile_buffer") and hasattr(st.session_state, "wellGDF") and st.session_state.wellGDF is not None:
         st.session_state.buffer_points = gpd.sjoin(left_df=st.session_state.wellGDF,
                                                 right_df=st.session_state.profile_buffer,
                                                 how="inner",
                                                 predicate="intersects")
         
         if hasattr(st.session_state, 'elevation_data'):
+            print("551 check map drawings sample elevation")
             uniqueWells = np.unique(st.session_state.buffer_points['API10'])
             # Potential update: use xarray indexing to sample data values
             xs = xr.DataArray(st.session_state.buffer_points["LONGITUDE"].values, dims="points")
@@ -555,6 +600,7 @@ def check_map_drawings():
 
 
 def make_profiles():
+    buffer = st.session_state.buffer_size
     if st.session_state.profile_type == 'Upload':
         try:
             profile = st.session_state.profile_from_file
@@ -562,6 +608,8 @@ def make_profiles():
             st.info("No Profile data has been uploaded. Either use 'Selection' as the Profile input type or upload a geospatial file with LineStrings")
     else:
         profile = st.session_state.current_profile
+        if profile is None:
+            return
         profile = LineString([(y, x) for x, y in profile.coords])
 
     profileDict = {"Labels": ["Profile"], 
@@ -578,7 +626,7 @@ def make_profiles():
                       'meters': 1,
                       'kilometers': 1000,
                       'miles': 1609.344}
-    buffSize_m = st.session_state.buffer_size * mConvertFactor[st.session_state.buffer_unit]
+    buffSize_m =  buffer * mConvertFactor[st.session_state.buffer_unit]
     profileUTMBuffer = profileUTM.buffer(distance=buffSize_m)
 
     profileUTMBuffer = gpd.GeoDataFrame(profileUTMBuffer, geometry=0)
@@ -593,15 +641,18 @@ def make_profiles():
         if hasattr(st.session_state, 'elevation_data'):
             if st.session_state.elevation_data is None:
                 st.session_state.elevation_data = get_elevation(st.session_state.elev_source)
+            print('600 make profiles SAMPLING ELEVATION')
             xArr = xr.DataArray(st.session_state.buffer_points['LONGITUDE'].values, dims="points")
             yArr = xr.DataArray(st.session_state.buffer_points["LATITUDE"].values, dims="points")
 
             st.session_state.buffer_points['SURFACE_ELEVATION'] = st.session_state.elevation_data.sel(x=xArr, y=yArr, method="nearest").values
 
+
 def profile_type_update():
     if st.session_state.profile_type == 'Selection':
         st.session_state.profile_crs = DEFAULT_POINTS_CRS
         print("UPDATED", st.session_state.profile_crs)
+
 
 @st.cache_data
 def get_elevation(elev_source):
@@ -637,7 +688,7 @@ def get_elevation(elev_source):
         ycoord_col_name = "LATITUDE"
 
     points_crs = CRS_DICT[st.session_state.well_input_crs].code
-    output_crs = CRS_DICT[st.session_state.project_crs].code
+    output_crs = 4326
     elev_source_type = 'service'
     raster_crs = None
     print("MADE IT TO THIS PART OF ELEVATION GETTING?")
@@ -775,10 +826,12 @@ def get_elevation(elev_source):
         elevData_m[0].plot()
         return elevData_m
 
+
 def read_profile():
     sa_gdf = gpd.read_file()
 
     st.session_state.profile = sa_gdf
+
 
 def get_utm_crs(point_geometry):
     from pyproj.database import query_utm_crs_info
@@ -803,7 +856,6 @@ def get_utm_crs(point_geometry):
     return utm_crs.code
 
 
-
 def plot_well_points():
     if st.session_state.plot_points_toggle:
         st.session_state.do_plot_wells = True
@@ -822,7 +874,12 @@ def ingest_profile():
 @st.cache_data
 def ingest_table(well_source):
     print("INGESTING TABLE")
-    if st.session_state.well_source == 'Table upload':
+    well_input_crs = 'EPSG:4269 - NAD83'
+    xcoord_col = "LONGITUDE"
+    ycoord_col = "LATITUDE" 
+    zcoord_col = 'ELEVATION'
+
+    if well_source == 'Table upload':
         # Can be used wherever a "file-like" object is accepted:
         profileBytes = st.session_state.well_uploader.getvalue()
         wellDF = pd.read_csv(BytesIO(profileBytes))
@@ -858,9 +915,7 @@ def ingest_table(well_source):
             wellDF.dropna(subset=["LATITUDE", "LONGITUDE"], inplace=True)
             wellDF = wellDF[['API10', 'LONGITUDE', 'LATITUDE', 'formation', 'top', 'bottom']]
             wellDF.columns = wellDF.columns.str.upper()
-            well_input_crs = 'EPSG:4269 - NAD83'
-            xcoord_col = "LONGITUDE"
-            ycoord_col = "LATITUDE"
+
         except Exception:
             wellDF = pd.DataFrame()
 
@@ -880,9 +935,26 @@ def ingest_table(well_source):
                                geometry=geocol,
                                crs=CRS_DICT[well_input_crs].code).to_crs(4326)
     except Exception:
+        print('Initial read-in did not work, using w4h sample data')
         traceback.print_exc()
-        gdf = None
-        
+        try:
+            resDict = w4h.get_resources(scope='statewide')
+            df = pd.read_csv(resDict['well_data'])
+            #df.rename(columns={'ID'}, inplace=True)
+            df.set_index('ID', drop=True, inplace=True)
+            print(df)
+            gdf = gpd.GeoDataFrame(df,
+                                   geometry=gpd.points_from_xy(x=df['LONGITUDE'], y=df['LATITUDE'], z=df['ELEVATION']),
+                                   crs=4269).to_crs(4326)
+            gdf['API10'] = gdf['API_NUMBER'].astype(int)/100
+
+            print(gdf.columns)
+            
+            
+        except Exception:
+            traceback.print_exc()
+            gdf = None
+    st.session_state.well_columns = gdf.columns
     return gdf
 
 #def 
@@ -952,27 +1024,45 @@ def ingest_table(well_source):
 
 def plot_well_profile():
     if hasattr(st.session_state, 'buffer_points') and 'SURFACE_ELEVATION' in st.session_state.buffer_points.columns:
-        df = st.session_state.buffer_points.copy()
+        gdf = st.session_state.buffer_points.copy()
         termsDF = pd.read_csv(w4h.get_resources()['LithologyDict_Exact'], usecols=["DESCRIPTION", "LITHOLOGY", "INTERPRETED"])
-        df = w4h.specific_define(df, termsDF)
+        gdf = w4h.specific_define(gdf, termsDF)
         well_id_list = np.unique(st.session_state.buffer_points["API10"])
-        minElev = df["BOTTOM_ELEV"].quantile(0.05)
-        maxElev = max(df.loc[:, "SURFACE_ELEVATION"])
-        df = df.dropna(subset=['API10', "LONGITUDE", "LATITUDE", "FORMATION", "INTERPRETED"])
+
+        print(st.session_state.elev_unit_in, st.session_state.plot_elev_unit)
+        print(st.session_state.elev_unit_in != st.session_state.plot_elev_unit)
+        if st.session_state.plot_elev_unit == 'feet':
+            # Meters to feet is only option
+            gdf['SURFACE_ELEVATION'] = gdf['SURFACE_ELEVATION'] / 0.3048
+            gdf['BOTTOM'] = gdf['BOTTOM'] / 0.3048
+            gdf['TOP'] = gdf['TOP'] / 0.3048
+
+            gdf["BOTTOM_ELEV"] = gdf['SURFACE_ELEVATION'] - gdf["BOTTOM"]
+            gdf["TOP_ELEV"] = gdf['SURFACE_ELEVATION'] - gdf["TOP"]
+
+        minElev = gdf["BOTTOM_ELEV"].quantile(0.05)
+        maxElev = max(gdf.loc[:, "SURFACE_ELEVATION"])
+        gdf = gdf.dropna(subset=['API10', "LONGITUDE", "LATITUDE", "FORMATION", "INTERPRETED"])
 
         print("MINNMAX", minElev, maxElev)
         eRange = abs(maxElev - minElev)
         ePad = eRange * 0.05
         yLIM = [minElev-ePad, maxElev+ePad]
 
+
+        if 'EPSG:4326' not in str(st.session_state.plot_crs):
+            gdf = gdf.to_crs(CRS_DICT[st.session_state.plot_crs].code)
+            gdf['LONGITUDE'] = gdf.geometry.x
+            gdf['LATITUDE'] = gdf.geometry.y
+
         # Get orientation
-        xmin = min(df["LONGITUDE"])
-        xmax = max(df["LONGITUDE"])
+        xmin = min(gdf["LONGITUDE"])
+        xmax = max(gdf["LONGITUDE"])
         xReversed = xmin > xmax
         xRange = abs(xmax - xmin)
 
-        ymin = min(df["LATITUDE"])
-        ymax = max(df["LATITUDE"])
+        ymin = min(gdf["LATITUDE"])
+        ymax = max(gdf["LATITUDE"])
         yReversed = ymin > ymax
         yRange = abs(ymax - ymin)
 
@@ -1000,7 +1090,7 @@ def plot_well_profile():
         legendList = []
         fig = go.Figure()
         for well in well_id_list:
-            wellDF = df[df['API10'] == well].reset_index(drop=True)
+            wellDF = gdf[gdf['API10'] == well].reset_index(drop=True)
             #print(wellDF[distCol])
 
             if len(wellDF[distCol]) > 0:
@@ -1021,7 +1111,7 @@ def plot_well_profile():
                     name=well
                 ))
         
-        for index, row in df.iterrows():
+        for index, row in gdf.iterrows():
             #print(row, distCol)
             xarr = [row[distCol], row[distCol]]
             yarr = [row["TOP_ELEV"], row["BOTTOM_ELEV"]]
@@ -1072,13 +1162,33 @@ def plot_well_profile():
                 name=legendName
             ))
             legendList.append(row["INTERPRETED"])
+        
+        if st.session_state.show_surf_elev:
+            gdf.drop_duplicates(subset=['API10'], inplace=True)
+            gdf.sort_values(distCol, inplace=True)
+            fig.add_trace(go.Scatter(
+                    x=gdf[distCol],
+                    y=gdf["SURFACE_ELEVATION"],
+                    #fill="toself",
+                    #fillcolor=fColor,
+                    line=dict(color='green', width=1),
+                    #marker=dict(size=4, line=dict(width=1, color='black'), symbol='line-ew'),
+                    mode='lines',
+                    hoverinfo='skip',
+                    showlegend=False,
+                    name='Surface Elevation'
+                ))
+
         fig.update_yaxes(range=[minElev, maxElev])
         fig.update_layout(hovermode='closest')
+        fig.update_xaxes(tickformat="f")
 
-        st.session_state.mapContainer.plotly_chart(fig,
-                                             key='well_profile',
-                                            width='stretch',
-                                            config={'displayModeBar': True})
+        with st.session_state.mapContainer:
+            st.plotly_chart(fig,
+                        key='well_profile',
+                        width='stretch',
+                        config={'displayModeBar': True})
+
 
 
 if __name__ == "__main__":
