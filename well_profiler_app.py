@@ -230,6 +230,130 @@ def draw_base_map(map=None):
         show=False,
     ).add_to(m)
 
+    bedrockURL = r"https://data.isgs.illinois.edu/arcgis/services/Geology/Bedrock_Geology_500K_2005/MapServer/WMSServer"
+    folium.WmsTileLayer(
+        url=bedrockURL,
+        name="IL Bedrock Map",
+        layers="0",
+        styles="",
+        fmt="image/png",
+        version="1.3.0",
+        transparent=True,
+        attr="Bedrock Geology",
+        overlay=True,
+        control=True,
+        show=False,
+    ).add_to(m)
+
+    # Bedrock Valleys
+    folium.WmsTileLayer(
+        url="https://data.isgs.illinois.edu/arcgis/services/Geology/Bedrock_Valleys/MapServer/WMSServer",
+        layers="0",
+        name="Bedrock Valleys",
+        fmt="image/png",
+        transparent=True,
+        overlay=True,
+        control=True,
+        version="1.3.0",
+        show=False
+    ).add_to(m)
+
+    # Get IL Counties
+    import requests
+
+    BASE_URL = "https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/USA_Census_Counties/FeatureServer/0/query"
+
+    params = {
+        "where": "STATE_NAME = 'Illinois'",
+        "outFields": "NAME,FIPS,STATE_NAME,POPULATION",
+        "returnGeometry": True,
+        "outSR": 4326,
+        "f": "geojson",
+    }
+
+    r = requests.get(BASE_URL, params=params)
+    r.raise_for_status()
+    counties_geojson = r.json()
+    #print(f"Fetched {len(counties_geojson['features'])} counties")
+
+    county_group = folium.FeatureGroup(name="Illinois Counties",
+                                       control=True,
+                                       interactive=False,
+                                       show=True)
+
+    #m = folium.Map(location=[40.0, -89.0], zoom_start=7)
+    folium.GeoJson(
+        counties_geojson,
+        name="Illinois Counties",
+        style_function=lambda feature: {
+            "fillColor": "transparent",
+            "color": "black",
+            "weight": 1.5,
+            "fillOpacity": 0,
+        },
+        interactive=False,
+        tooltip=folium.GeoJsonTooltip(
+            fields=["NAME"],
+            aliases=["County"],
+            sticky=True,
+            popup=True,
+        ),
+    ).add_to(county_group)
+
+    from shapely.geometry import shape
+
+    for feature in counties_geojson["features"]:
+        geom = shape(feature["geometry"])
+        centroid = geom.centroid
+        name = feature["properties"]["NAME"]
+        
+        folium.Marker(
+            location=[centroid.y, centroid.x],
+            icon=folium.DivIcon(
+                html=f'<div style="font-size:9px; color:black; white-space:nowrap; text-shadow: -1px -1px 0 white, 1px -1px 0 white, -1px 1px 0 white, 1px 1px 0 white;">{name.split(" County")[0]}</div>',
+                icon_size=(100, 20),
+                icon_anchor=(50, 10),
+            ),
+            interactive=False,
+        ).add_to(county_group)
+
+    county_group.add_to(m)
+
+    folium.LayerControl().add_to(m)
+
+    # Get PLSS Townships
+    BASE_URL = r"https://services2.arcgis.com/FiaPA4ga0iQKduv3/arcgis/rest/services/Public_Land_Survey_System_view/FeatureServer/0/query"
+
+    params = {
+        "where": "1=1",        # required — return all records
+        "outFields": "1",      # * for all fields, or comma-separated names
+        "returnGeometry": True,
+        "outSR": 4326,
+        "f": "geojson",
+    }
+
+    r = requests.get(BASE_URL, params=params)
+    r.raise_for_status()
+    plss_geojson = r.json()
+    
+    #m = folium.Map(location=[40.0, -89.0], zoom_start=7)
+    #folium.GeoJson(
+    #    plss_geojson,
+    #    name="PLSS Townships",
+    #    style_function=lambda feature: {
+    #        "fillColor": "transparent",
+    #        "color": "black",
+    #        "weight": 1,
+    ##        "fillOpacity": 0.5,
+     #   },
+        #tooltip=folium.GeoJsonTooltip(
+        #    fields=["FIELD_EXP_0"],
+        #),
+    #).add_to(m)
+
+    #folium.LayerControl().add_to(m)
+
+
     if hasattr(st.session_state, 'profile_buffer') and isinstance(st.session_state.profile_buffer, gpd.GeoDataFrame):
         bpDF = st.session_state.buffer_points.copy()
         uniqueWells = np.unique(bpDF['API10'])
@@ -829,7 +953,7 @@ def ingest_table(well_source):
 def plot_well_profile():
     if hasattr(st.session_state, 'buffer_points') and 'SURFACE_ELEVATION' in st.session_state.buffer_points.columns:
         df = st.session_state.buffer_points.copy()
-        termsDF = pd.read_csv(w4h.get_resources()['LithologyDict_Exact'])
+        termsDF = pd.read_csv(w4h.get_resources()['LithologyDict_Exact'], usecols=["DESCRIPTION", "LITHOLOGY", "INTERPRETED"])
         df = w4h.specific_define(df, termsDF)
         well_id_list = np.unique(st.session_state.buffer_points["API10"])
         minElev = df["BOTTOM_ELEV"].quantile(0.05)
@@ -955,8 +1079,7 @@ def plot_well_profile():
                                              key='well_profile',
                                             width='stretch',
                                             config={'displayModeBar': True})
-        print(fig.data[0].hoverinfo)
-        print(fig.data[0].text)
+
 
 if __name__ == "__main__":
     main()
