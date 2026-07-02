@@ -195,9 +195,23 @@ def main():
         elevUnitCol.selectbox('Plot Elevation Unit',
                                 options=['feet', 'meters'],
                                 index=0, key='plot_elev_unit')
-        projCol.selectbox(label="Plot CRS", options=CRS_STR_LIST,
-                    index=DEFAULT_POINTS_CRS_INDEX,
-                    key='plot_crs')
+        plotDistCol, projTypeCol = projCol.columns([0.5, 0.5])
+        plotDistCol.selectbox("Distance Type", options=['CRS units (auto)',
+                                             'Distance along profile',
+                                             'CRS X (not currently supported)',
+                                             'CRS Y (not currently supported)'],
+                           index=0,
+                           key='plot_distance_type')
+
+        if "CRS" in st.session_state.plot_distance_type:
+            projTypeCol.selectbox(label="Plot CRS", options=CRS_STR_LIST,
+                        index=DEFAULT_POINTS_CRS_INDEX,
+                        key='plot_crs')
+        else:
+            projTypeCol.selectbox(label="Plot Distance Unit", options=['feet', 'meters', 'kilometers', 'miles'],
+                                    index=2,
+                                    key='plot_distance_unit')            
+
         if "current_profile" not in st.session_state:
             st.session_state.current_profile = None
         if "new_map_draw" not in st.session_state:
@@ -615,6 +629,7 @@ def make_profiles():
     
     profileUTMBuffer = gpd.GeoDataFrame(profileUTMBuffer, geometry=0)
 
+    st.session_state.utm_crs = utmCRS
     st.session_state.buffer_size_m = buffSize_m
     st.session_state.profile_utm = profileUTM
     st.session_state.profile_buffer_utm = profileUTMBuffer
@@ -1011,15 +1026,17 @@ def ingest_table(well_source):
 
 def plot_well_profile():
     if hasattr(st.session_state, 'buffer_points') and 'SURFACE_ELEVATION' in st.session_state.buffer_points.columns:
+        # Prepare local GDF
         gdf = st.session_state.buffer_points.copy()
         termsDF = pd.read_csv(w4h.get_resources()['LithologyDict_Exact'], usecols=["DESCRIPTION", "LITHOLOGY", "INTERPRETED"])
         gdf = w4h.specific_define(gdf, termsDF)
         well_id_list = np.unique(st.session_state.buffer_points["API10"])
 
+        # Prepare elevation values
         print(st.session_state.elev_unit_in, st.session_state.plot_elev_unit)
         print(st.session_state.elev_unit_in != st.session_state.plot_elev_unit)
         if st.session_state.plot_elev_unit == 'feet':
-            # Meters to feet is only option
+            # Meters to feet is only conversion needed
             gdf['SURFACE_ELEVATION'] = gdf['SURFACE_ELEVATION'] / 0.3048
             gdf['BOTTOM'] = gdf['BOTTOM'] / 0.3048
             gdf['TOP'] = gdf['TOP'] / 0.3048
@@ -1036,11 +1053,27 @@ def plot_well_profile():
         ePad = eRange * 0.1
         yLIM = [minElev-ePad, maxElev+(ePad/2)]
 
+        # Convert "Longitude" and "Latitude" columns of local gdf to appropriate coordinates
+        
+        if 'CRS' in st.session_state.plot_distance_type:
+            if 'EPSG:4326' not in str(st.session_state.plot_crs):
+                gdf = gdf.to_crs(CRS_DICT[st.session_state.plot_crs].code)
+                gdf['LONGITUDE'] = gdf.geometry.x
+                gdf['LATITUDE'] = gdf.geometry.y
+        else:
+            # Get the polyline geometry
+            line = st.session_state.profile_utm.geometry.iloc[0]
 
-        if 'EPSG:4326' not in str(st.session_state.plot_crs):
-            gdf = gdf.to_crs(CRS_DICT[st.session_state.plot_crs].code)
-            gdf['LONGITUDE'] = gdf.geometry.x
-            gdf['LATITUDE'] = gdf.geometry.y
+            # Distance along the line in meters
+            gdf_utm = gdf.to_crs(st.session_state.utm_crs)
+            gdf["LONGITUDE"] = gdf["LATITUDE"] = gdf_utm.geometry.apply(line.project)
+
+            mConvertFactor = {'feet': 0.3048,
+                            'meters': 1,
+                            'kilometers': 1000,
+                            'miles': 1609.344}
+            gdf["LONGITUDE"] =  gdf["LONGITUDE"] / mConvertFactor[st.session_state.plot_distance_unit]
+            gdf["LATITUDE"] =  gdf["LATITUDE"] / mConvertFactor[st.session_state.plot_distance_unit]
 
         # Get orientation
         xmin = min(gdf["LONGITUDE"])
@@ -1073,6 +1106,7 @@ def plot_well_profile():
             return xReturn, yReturn
 
 
+        print(gdf[distCol])
         # Plot data
         legendList = []
         fig = go.Figure()
@@ -1168,30 +1202,48 @@ def plot_well_profile():
                 ))
 
         # Display vertical exaggeration
-        xDist_m = st.session_state.profile_buffer_utm.geometry.length
-        xDist_plotCRS = st.session_state.profile_buffer_utm.to_crs(CRS_DICT[st.session_state.plot_crs].code).length
-        m2PlotCoords = (xDist_plotCRS / xDist_m).values[0]
-        print(m2PlotCoords)
-        xDist_m = xDist_m + (2*st.session_state.buffer_size_m)
-        yDist_m = yLIM[1] - yLIM[0]
-        if st.session_state.plot_elev_unit == 'feet':
-            yDist_m = yDist_m * 0.3048
-
-        print(st.session_state.profile_buffer.geometry.bounds)
-        if distCol == 'LATITUDE':
-            maxVal = 'maxy'
-            minVal = 'miny'
-        else:
-            maxVal = 'maxx'
-            minVal = 'minx'
-        xRange = st.session_state.profile_buffer.geometry.bounds[maxVal].values[0] \
-               - st.session_state.profile_buffer.geometry.bounds[minVal].values[0]
-        center_X = st.session_state.profile_buffer.geometry.bounds[minVal].values[0] - (0.01 * xRange)
-        center_Y = np.mean(yLIM)
-        print("CENTER", center_X, center_Y)
-        theta = np.linspace(0, 2 * np.pi, 360)
         r = 100
-        x = (r * m2PlotCoords) * np.cos(theta) + center_X
+        if 'CRS' in st.session_state.plot_distance_type:
+            xDist_m = st.session_state.profile_buffer_utm.geometry.length
+            xDist_plotCRS = st.session_state.profile_buffer_utm.to_crs(CRS_DICT[st.session_state.plot_crs].code).length
+            xDist_plotCoords = (xDist_plotCRS / xDist_m).values[0]
+            print(xDist_plotCoords)
+            xDist_m = xDist_m + (2*st.session_state.buffer_size_m)
+            yDist_m = yLIM[1] - yLIM[0]
+            if st.session_state.plot_elev_unit == 'feet':
+                yDist_m = yDist_m * 0.3048
+
+            print(st.session_state.profile_buffer.geometry.bounds)
+            if distCol == 'LATITUDE':
+                maxVal = 'maxy'
+                minVal = 'miny'
+            else:
+                maxVal = 'maxx'
+                minVal = 'minx'
+            xRange = st.session_state.profile_buffer.geometry.bounds[maxVal].values[0] \
+                - st.session_state.profile_buffer.geometry.bounds[minVal].values[0]
+            center_X = st.session_state.profile_buffer.geometry.bounds[minVal].values[0] - (0.01 * xRange)
+            center_Y = np.mean(yLIM)
+            xRadius = r * xDist_plotCoords
+            print("CENTER", center_X, center_Y)
+        else:
+            maxXDist_m = st.session_state.profile_buffer_utm.geometry.length.values[0]
+            maxXDist_m += (2*st.session_state.buffer_size_m)
+            print(maxXDist_m)
+            mConvertFactor = {'feet': 0.3048,
+                              'meters': 1,
+                              'kilometers': 1000,
+                              'miles': 1609.344}
+            xDist_plotCoords = (maxXDist_m / mConvertFactor[st.session_state.plot_distance_unit])
+
+            xRange = xDist_plotCoords
+            xRadius = r / mConvertFactor[st.session_state.plot_distance_unit]
+            print(xDist_plotCoords)
+            center_X = -0.01 * xRange
+            center_Y = np.mean(yLIM)
+        
+        theta = np.linspace(0, 2 * np.pi, 360)
+        x = xRadius * np.cos(theta) + center_X
         y = r * np.sin(theta) + center_Y
 
         fig.add_trace(go.Scatter(x=x, y=y, mode='lines', fill='toself',
