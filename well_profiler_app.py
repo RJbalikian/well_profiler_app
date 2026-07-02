@@ -196,12 +196,13 @@ def main():
                                 options=['feet', 'meters'],
                                 index=0, key='plot_elev_unit')
         plotDistCol, projTypeCol = projCol.columns([0.5, 0.5])
-        plotDistCol.selectbox("Distance Type", options=['CRS units (auto)',
-                                             'Distance along profile',
-                                             'CRS X (not currently supported)',
-                                             'CRS Y (not currently supported)'],
-                           index=0,
-                           key='plot_distance_type')
+        plotDistCol.selectbox("Distance Type", 
+                              options=['Distance along profile',
+                                        'CRS units (auto)',
+                                        'CRS X (not currently supported)',
+                                        'CRS Y (not currently supported)'],
+                              index=0,
+                              key='plot_distance_type')
 
         if "CRS" in st.session_state.plot_distance_type:
             projTypeCol.selectbox(label="Plot CRS", options=CRS_STR_LIST,
