@@ -69,8 +69,6 @@ def main():
         titleCol, emptyCol, menuCol, tCol = st.columns([0.35, 0.1, 0.05, 0.5],
                                                   vertical_alignment='bottom')
         titleCol.title('Well Profiler')
-        menuCol.menu_button('TestMenu', options=['OPTION 1', 'option 2'])
-
 
         st.header('Specify Profile', divider='rainbow')
         pillCol, uploadCol, pCRSCol = st.columns([0.2, 0.6, 0.2],)
@@ -512,9 +510,9 @@ def draw_base_map(map=None):
     # Plot profile!!
     if hasattr(st.session_state, "buffer_points"):
         df = st.session_state.buffer_points
-        if not hasattr(st.session_state, "elevation_data"):
-            print('profplot 468 get elevation')
-            st.session_state.elevation_data = get_elevation(st.session_state.elev_source)
+        #if not hasattr(st.session_state, "elevation_data"):
+        #    print('profplot 468 get elevation')
+        st.session_state.elevation_data = get_elevation(st.session_state.elev_source)
 
         if df is not None and "SURFACE_ELEVATION" not in df.columns:
             if not hasattr(st.session_state, 'elevation_data'):
@@ -614,8 +612,12 @@ def make_profiles():
                       'miles': 1609.344}
     buffSize_m =  buffer * mConvertFactor[st.session_state.buffer_unit]
     profileUTMBuffer = profileUTM.buffer(distance=buffSize_m)
-
+    
     profileUTMBuffer = gpd.GeoDataFrame(profileUTMBuffer, geometry=0)
+
+    st.session_state.buffer_size_m = buffSize_m
+    st.session_state.profile_utm = profileUTM
+    st.session_state.profile_buffer_utm = profileUTMBuffer
     st.session_state.profile_buffer = profileUTMBuffer.to_crs("EPSG:4326")
 
     if hasattr(st.session_state, 'wellGDF') and isinstance(st.session_state.wellGDF, (gpd.GeoDataFrame)):
@@ -640,7 +642,6 @@ def profile_type_update():
         print("UPDATED", st.session_state.profile_crs)
 
 
-@st.cache_data
 def get_elevation(elev_source):
 
     """This function takes coordinates, specified raster (services), and specified output CRS
@@ -1026,14 +1027,14 @@ def plot_well_profile():
             gdf["BOTTOM_ELEV"] = gdf['SURFACE_ELEVATION'] - gdf["BOTTOM"]
             gdf["TOP_ELEV"] = gdf['SURFACE_ELEVATION'] - gdf["TOP"]
 
-        minElev = gdf["BOTTOM_ELEV"].quantile(0.05)
+        minElev = gdf["BOTTOM_ELEV"].quantile(0.01)
         maxElev = max(gdf.loc[:, "SURFACE_ELEVATION"])
         gdf = gdf.dropna(subset=['API10', "LONGITUDE", "LATITUDE", "FORMATION", "INTERPRETED"])
 
         print("MINNMAX", minElev, maxElev)
         eRange = abs(maxElev - minElev)
-        ePad = eRange * 0.05
-        yLIM = [minElev-ePad, maxElev+ePad]
+        ePad = eRange * 0.1
+        yLIM = [minElev-ePad, maxElev+(ePad/2)]
 
 
         if 'EPSG:4326' not in str(st.session_state.plot_crs):
@@ -1089,7 +1090,7 @@ def plot_well_profile():
                     y=[minWellElev, maxWellElev],
                     #fill="toself",
                     #fillcolor=fColor,
-                    line=dict(color='black', width=2, dash="3px 1px"),
+                    line=dict(color='black', width=1, dash="3px 1px"),
                     marker=dict(size=4, line=dict(width=1, color='black'), symbol='line-ew'),
                     mode='markers+lines',
                     hoverinfo='skip',
@@ -1124,7 +1125,7 @@ def plot_well_profile():
                 y=yboxarr,
                 #fill="toself",
                 #fillcolor=fColor,
-                line=dict(color=fColor, width=2),
+                line=dict(color=fColor, width=2.5),
                 #linecolor=None,
                 mode='lines',
                             
@@ -1149,12 +1150,13 @@ def plot_well_profile():
             ))
             legendList.append(row["INTERPRETED"])
         
+        # Show surface elevation plot if selected
         if st.session_state.show_surf_elev:
-            gdf.drop_duplicates(subset=['API10'], inplace=True)
-            gdf.sort_values(distCol, inplace=True)
+            surfGDF = gdf.drop_duplicates(subset=['API10'])
+            surfGDF = gdf.sort_values(distCol)
             fig.add_trace(go.Scatter(
-                    x=gdf[distCol],
-                    y=gdf["SURFACE_ELEVATION"],
+                    x=surfGDF[distCol],
+                    y=surfGDF["SURFACE_ELEVATION"],
                     #fill="toself",
                     #fillcolor=fColor,
                     line=dict(color='green', width=1),
@@ -1165,17 +1167,48 @@ def plot_well_profile():
                     name='Surface Elevation'
                 ))
 
-        fig.update_yaxes(range=[minElev, maxElev])
+        # Display vertical exaggeration
+        xDist_m = st.session_state.profile_buffer_utm.geometry.length
+        xDist_plotCRS = st.session_state.profile_buffer_utm.to_crs(CRS_DICT[st.session_state.plot_crs].code).length
+        m2PlotCoords = (xDist_plotCRS / xDist_m).values[0]
+        print(m2PlotCoords)
+        xDist_m = xDist_m + (2*st.session_state.buffer_size_m)
+        yDist_m = yLIM[1] - yLIM[0]
+        if st.session_state.plot_elev_unit == 'feet':
+            yDist_m = yDist_m * 0.3048
+
+        print(st.session_state.profile_buffer.geometry.bounds)
+        if distCol == 'LATITUDE':
+            maxVal = 'maxy'
+            minVal = 'miny'
+        else:
+            maxVal = 'maxx'
+            minVal = 'minx'
+        xRange = st.session_state.profile_buffer.geometry.bounds[maxVal].values[0] \
+               - st.session_state.profile_buffer.geometry.bounds[minVal].values[0]
+        center_X = st.session_state.profile_buffer.geometry.bounds[minVal].values[0] - (0.01 * xRange)
+        center_Y = np.mean(yLIM)
+        print("CENTER", center_X, center_Y)
+        theta = np.linspace(0, 2 * np.pi, 360)
+        r = 100
+        x = (r * m2PlotCoords) * np.cos(theta) + center_X
+        y = r * np.sin(theta) + center_Y
+
+        fig.add_trace(go.Scatter(x=x, y=y, mode='lines', fill='toself',
+                                 name='', fillcolor='black',
+                                 line=dict(width=0.1)))
+
+        fig.update_yaxes(range=yLIM)
         fig.update_layout(hovermode='closest')
         fig.update_xaxes(tickformat="f")
 
         with st.session_state.mapContainer:
+            st.write("Black Circle on left indicates vertical exaggeration")
             st.plotly_chart(fig,
                         key='well_profile',
                         width='stretch',
                         config={'displayModeBar': True})
-
-
+            
 
 if __name__ == "__main__":
     main()
