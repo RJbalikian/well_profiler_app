@@ -1129,10 +1129,27 @@ def plot_well_profile():
                     marker=dict(size=4, line=dict(width=1, color='black'), symbol='line-ew'),
                     mode='markers+lines',
                     hoverinfo='skip',
+                    opacity=0.2,
                     showlegend=False,
                     name=well
                 ))
-        
+
+                hoverText = f"{well} ({wellDF["LONGITUDE"].iloc[0]}, {wellDF["LATITUDE"].iloc[0]})"
+                fig.add_trace(go.Scatter(
+                    x=[wellX],
+                    y=[maxWellElev+3],
+                    #fill="toself",
+                    #fillcolor=fColor,
+                    line=dict(color='black', width=1, dash="3px 1px"),
+                    marker=dict(size=4, line=dict(width=0, color='black'), symbol='star-triangle-down'),
+                    mode='markers',
+                    hoverinfo='text',
+                    hovertext=hoverText,                
+                    opacity=0.8,
+                    showlegend=False,
+                    name=well
+                ))
+
         for index, row in gdf.iterrows():
             #print(row, distCol)
             xarr = [row[distCol], row[distCol]]
@@ -1146,9 +1163,12 @@ def plot_well_profile():
             showLegend = True
             if row['INTERPRETED'] in legendList:
                 showLegend = False
-                
-            hoverText = f"Well: {row['API10']} <br> Description: {row['FORMATION'][:25]} <br> Interpretation: {row['INTERPRETED']}"
-            #print("HVRTEXT", hoverText)
+
+            eUnitStr = 'm'
+            if st.session_state.plot_elev_unit.lower() in ['f', 'ft', "'", 'foot', 'feet']:
+                eUnitStr = "'"
+            hoverText = f"{row["TOP"]:.1f}{eUnitStr}-{row["BOTTOM"]:.1f}{eUnitStr} (Elev: {row["TOP_ELEV"]:.1f}{eUnitStr}-{row['BOTTOM_ELEV']:.1f}{eUnitStr}) <br> Description: {row['FORMATION'][:25]} <br> Interpretation: {row['INTERPRETED']}"
+                    
             # Define rectangle corners
             try:
                 fColor = COLORMAPDICT[row["INTERPRETED"]]
@@ -1252,7 +1272,7 @@ def plot_well_profile():
                                  line=dict(width=0.1)))
 
         fig.update_yaxes(range=yLIM)
-        fig.update_layout(hovermode='closest')
+        fig.update_layout(hovermode='x', hoverdistance=1)
         fig.update_xaxes(tickformat="f")
 
         with st.session_state.mapContainer:
