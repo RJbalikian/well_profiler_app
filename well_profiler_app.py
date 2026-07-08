@@ -1207,20 +1207,60 @@ def plot_well_profile():
         
         # Show surface elevation plot if selected
         if st.session_state.show_surf_elev:
-            surfGDF = gdf.drop_duplicates(subset=['API10'])
-            surfGDF = gdf.sort_values(distCol)
-            fig.add_trace(go.Scatter(
-                    x=surfGDF[distCol],
-                    y=surfGDF["SURFACE_ELEVATION"],
-                    #fill="toself",
-                    #fillcolor=fColor,
-                    line=dict(color='green', width=1),
-                    #marker=dict(size=4, line=dict(width=1, color='black'), symbol='line-ew'),
-                    mode='lines',
-                    hoverinfo='skip',
-                    showlegend=False,
-                    name='Surface Elevation'
-                ))
+            profileLineStringUTM = st.session_state.profile_utm.geometry.iloc[0]
+            utmLength = profileLineStringUTM.length
+            ptSpacing = utmLength/1000 # Make 1000 points
+            profilePoints = profileLineStringUTM.interpolate(np.arange(0, utmLength, ptSpacing))
+            
+            samplepointsGDF = gpd.GeoDataFrame(geometry=profilePoints, crs=st.session_state.utm_crs).to_crs(4326)
+
+            xs = xr.DataArray(samplepointsGDF.geometry.x, dims="points")
+            ys = xr.DataArray(samplepointsGDF.geometry.y, dims="points")
+
+            surfElev = st.session_state.elevation_data.sel(x=xs, y=ys, method='nearest')
+
+            if 'CRS' not in st.session_state.plot_distance_type:
+                samplePoints = np.arange(0, utmLength, ptSpacing)
+                mConvertFactor = {'feet': 0.3048,
+                    'meters': 1,
+                    'kilometers': 1000,
+                    'miles': 1609.344}
+                samplePoints /= mConvertFactor[st.session_state.plot_distance_unit]
+                surfElev /= mConvertFactor[st.session_state.plot_elev_unit]
+            elif str(distCol).lower() in ['latitude', 'latitude', 'lat', 'y', 'northing', 'utmn']:
+                plotCRS = CRS_DICT[st.session_state.plot_crs].code
+                samplePoints = samplepointsGDF.to_crs(plotCRS).geometry.y
+            else:
+                plotCRS = CRS_DICT[st.session_state.plot_crs].code
+                samplePoints = samplepointsGDF.to_crs(plotCRS).geometry.x
+
+            if 'f' in st.session_state.plot_elev_unit:
+                surfElev = surfElev / 0.3048
+
+            fig.add_trace(go.Scatter(x=samplePoints,
+                        y=surfElev,
+                        mode='lines',
+                        name='Surface Elevation',
+                        line=dict(color='green', width=3),
+                        showlegend=True,
+                        ),
+            )
+
+            # Old surface plotting using well elevations
+            #surfGDF = gdf.drop_duplicates(subset=['API10'])
+            #surfGDF = gdf.sort_values(distCol)
+            #fig.add_trace(go.Scatter(
+            #        x=surfGDF[distCol],
+            #        y=surfGDF["SURFACE_ELEVATION"],
+            #        #fill="toself",
+            #        #fillcolor=fColor,
+            #        line=dict(color='green', width=1),
+            #        #marker=dict(size=4, line=dict(width=1, color='black'), symbol='line-ew'),
+            #        mode='lines',
+            #        hoverinfo='skip',
+            #        showlegend=False,
+            #        name='Surface Elevation'
+            #    ))
 
         # Display vertical exaggeration
         r = 100
@@ -1276,7 +1316,7 @@ def plot_well_profile():
         fig.update_xaxes(tickformat="f")
 
         with st.session_state.mapContainer:
-            st.write("Black Circle on left indicates vertical exaggeration")
+            st.write(f"Black Circle on left indicates vertical exaggeration. Number of wells in profile: {len(well_id_list)}")
             st.plotly_chart(fig,
                         key='well_profile',
                         width='stretch',
