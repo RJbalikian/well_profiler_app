@@ -45,6 +45,8 @@ DEFAULT_POINTS_CRS = "EPSG:4326 - WGS 84"  # "EPSG:6345 - NAD83(2011) / UTM zone
 DEFAULT_POINTS_CRS_INDEX = CRS_STR_LIST.index(DEFAULT_POINTS_CRS)
 DEFAULT_OUTPUT_CRS = DEFAULT_POINTS_CRS
 
+import os
+print(os.getcwd())
 
 with open('thomason_colors.json', 'r') as jf:
     COLORMAPDICT = json.load(jf)
@@ -86,7 +88,7 @@ def main():
                             key='profile_crs')
         else:
             st.session_state.profile_crs = DEFAULT_POINTS_CRS
-            uploadCol.header("Use map to draw profile", text_alignment='right')
+            uploadCol.header("Use map to draw profile")
 
 
         # Well Data section
@@ -101,11 +103,14 @@ def main():
                                 key='well_uploader', on_change=ingest_table)
         else:
             st.session_state.wellGDF = wellGDF = ingest_table(well_source)
-            print("TTYPES", type(st.session_state.wellGDF), type(wellGDF))
-            if st.session_state.wellGDF is not None:
-                st.session_state.tableTab.dataframe(st.session_state.wellGDF.to_arrow(geometry_encoding='geoarrow'))
-            else:
-                st.session_state.tableTab.write("Point table not read in correctly")
+            try:
+                print("TTYPES", type(st.session_state.wellGDF), type(wellGDF))
+                if st.session_state.wellGDF is not None:
+                    st.session_state.tableTab.dataframe(st.session_state.wellGDF.to_arrow(geometry_encoding='geoarrow'))
+                else:
+                    st.session_state.tableTab.write("Point table not read in correctly")
+            except Exception:
+                traceback.print_exc()
         xcol, ycol, crscol = st.columns([0.3, 0.3, 0.6])
 
         colDisabled = False
@@ -549,7 +554,7 @@ def draw_base_map(map=None):
             xs = xr.DataArray(df["LONGITUDE"].values, dims="points")
             ys = xr.DataArray(df["LATITUDE"].values, dims="points")
 
-            st.session_state.elevation_data[0].plot()
+            #st.session_state.elevation_data[0].plot()
             zData = st.session_state.elevation_data.sel(x=xs,
                                                         y=ys,
                                                         method="nearest").values
@@ -950,7 +955,7 @@ def ingest_table(well_source):
                                    geometry=gpd.points_from_xy(x=df['LONGITUDE'], y=df['LATITUDE'], z=df['ELEVATION']),
                                    crs=4269).to_crs(4326)
             gdf['API10'] = gdf['API_NUMBER'].astype(int)/100
-
+            
             print(gdf.columns)
             
             
@@ -1226,7 +1231,7 @@ def plot_well_profile():
                     'kilometers': 1000,
                     'miles': 1609.344}
                 samplePoints /= mConvertFactor[st.session_state.plot_distance_unit]
-                surfElev /= mConvertFactor[st.session_state.plot_elev_unit]
+                #surfElev /= mConvertFactor[st.session_state.plot_elev_unit]
             elif str(distCol).lower() in ['latitude', 'latitude', 'lat', 'y', 'northing', 'utmn']:
                 plotCRS = CRS_DICT[st.session_state.plot_crs].code
                 samplePoints = samplepointsGDF.to_crs(plotCRS).geometry.y
