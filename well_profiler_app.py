@@ -197,6 +197,16 @@ def main():
                            options=['feet', 'meters', 'kilometers', 'miles'],
                            index=2, key='buffer_unit')
         showElevCol.checkbox('Show Elevation', value=True,key='show_surf_elev')
+        intervalLabel = "Display all intervals"
+        if hasattr(st.session_state, 'well_hover_mode_check') and not st.session_state.well_hover_mode_check:
+            intervalLabel = "Display one interval"
+        showElevCol.checkbox(intervalLabel, value=True, key='well_hover_mode_check')
+        if st.session_state.well_hover_mode_check:
+            st.session_state.well_hover_mode = "x"
+            st.session_state.hoverDist = 1
+        else:
+            st.session_state.well_hover_mode = "closest"
+            st.session_state.hoverDist = 12
         elevUnitCol.selectbox('Plot Elevation Unit',
                                 options=['feet', 'meters'],
                                 index=0, key='plot_elev_unit')
@@ -226,7 +236,6 @@ def main():
             st.session_state.map_result = {'last_active_drawing': None}
 
         if not st.session_state.new_map_draw:
-            print("DRAWING BASE MAP")
             draw_base_map()
             st.session_state.new_map_draw = False
         else:
@@ -1317,14 +1326,16 @@ def plot_well_profile():
                                  line=dict(width=0.1)))
 
         fig.update_yaxes(range=yLIM)
-        fig.update_layout(hovermode='x', hoverdistance=1)
+        fig.update_layout(hovermode=st.session_state.well_hover_mode, 
+                          hoverdistance=st.session_state.hoverDist,
+                          height=800)
         fig.update_xaxes(tickformat="f")
 
         with st.session_state.mapContainer:
             st.write(f"Black Circle on left indicates vertical exaggeration. Number of wells in profile: {len(well_id_list)}")
             st.plotly_chart(fig,
                         key='well_profile',
-                        width='stretch',
+                        width='stretch', theme='streamlit',
                         config={'displayModeBar': True})
             
 
