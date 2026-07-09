@@ -1048,16 +1048,15 @@ def plot_well_profile():
         well_id_list = np.unique(st.session_state.buffer_points["API10"])
 
         # Prepare elevation values
-        print(st.session_state.elev_unit_in, st.session_state.plot_elev_unit)
-        print(st.session_state.elev_unit_in != st.session_state.plot_elev_unit)
         if st.session_state.plot_elev_unit == 'feet':
             # Meters to feet is only conversion needed
             gdf['SURFACE_ELEVATION'] = gdf['SURFACE_ELEVATION'] / 0.3048
-            gdf['BOTTOM'] = gdf['BOTTOM'] / 0.3048
-            gdf['TOP'] = gdf['TOP'] / 0.3048
+        else:
+            gdf['BOTTOM'] = gdf['BOTTOM'] * 0.3048
+            gdf['TOP'] = gdf['TOP'] * 0.3048
 
-            gdf["BOTTOM_ELEV"] = gdf['SURFACE_ELEVATION'] - gdf["BOTTOM"]
-            gdf["TOP_ELEV"] = gdf['SURFACE_ELEVATION'] - gdf["TOP"]
+        gdf["BOTTOM_ELEV"] = gdf['SURFACE_ELEVATION'] - gdf["BOTTOM"]
+        gdf["TOP_ELEV"] = gdf['SURFACE_ELEVATION'] - gdf["TOP"]
 
         minElev = gdf["BOTTOM_ELEV"].quantile(0.01)
         maxElev = max(gdf.loc[:, "SURFACE_ELEVATION"])
@@ -1120,8 +1119,6 @@ def plot_well_profile():
             yReturn = [y[1], y[0], y[0], y[1], y[1]]
             return xReturn, yReturn
 
-
-        print(gdf[distCol])
         # Plot data
         legendList = []
         fig = go.Figure()
