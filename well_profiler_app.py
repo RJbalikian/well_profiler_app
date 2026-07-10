@@ -228,6 +228,11 @@ def main():
                                     index=2,
                                     key='plot_distance_unit')            
 
+        elDLButton, brDLButton, profileDLButton, emptyButtonCol = st.columns([0.3, 0.3, 0.3, 0.6])
+        elDLButton.download_button("Elevation Profile")
+        brDLButton.download_button("Bedrock Profile")
+        profileDLButton.download_button("Profile")
+
         if "current_profile" not in st.session_state:
             st.session_state.current_profile = None
         if "new_map_draw" not in st.session_state:
