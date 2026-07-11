@@ -197,6 +197,7 @@ def main():
                            options=['feet', 'meters', 'kilometers', 'miles'],
                            index=2, key='buffer_unit')
         showElevCol.checkbox('Show Elevation', value=True,key='show_surf_elev')
+        showElevCol.checkbox('Show Bedrock Surface', value=True, key='show_br_elev')
         intervalLabel = "Display all intervals"
         if hasattr(st.session_state, 'well_hover_mode_check') and not st.session_state.well_hover_mode_check:
             intervalLabel = "Display one interval"
@@ -228,10 +229,10 @@ def main():
                                     index=2,
                                     key='plot_distance_unit')            
 
-        elDLButton, brDLButton, profileDLButton, emptyButtonCol = st.columns([0.3, 0.3, 0.3, 0.6])
-        elDLButton.download_button("Elevation Profile")
-        brDLButton.download_button("Bedrock Profile")
-        profileDLButton.download_button("Profile")
+        #elDLButton, brDLButton, profileDLButton, emptyButtonCol = st.columns([0.3, 0.3, 0.3, 0.6])
+        #elDLButton.download_button("Elevation Profile")
+        #brDLButton.download_button("Bedrock Profile")
+        #profileDLButton.download_button("Profile")
 
         if "current_profile" not in st.session_state:
             st.session_state.current_profile = None
@@ -564,7 +565,7 @@ def draw_base_map(map=None):
                 print('We elsed')
                 print(type(st.session_state.elevation_data))
                 print(st.session_state.elevation_data)
-            print("485 draw base map sampling elv")
+
             xs = xr.DataArray(df["LONGITUDE"].values, dims="points")
             ys = xr.DataArray(df["LATITUDE"].values, dims="points")
 
@@ -1277,6 +1278,51 @@ def plot_well_profile():
             #        showlegend=False,
             #        name='Surface Elevation'
             #    ))
+        if st.session_state.show_br_elev:
+            # Get 1000 profile points for sampling
+            profileLineStringUTM = st.session_state.profile_utm.geometry.iloc[0]
+            utmLength = profileLineStringUTM.length
+            ptSpacing = utmLength/100 # Make 1000 points
+            profilePoints = profileLineStringUTM.interpolate(np.arange(0, utmLength, ptSpacing))
+            
+            # Make that into geodataframe
+            samplepointsGDF = gpd.GeoDataFrame(geometry=profilePoints, crs=st.session_state.utm_crs).to_crs(4326)
+            # Make into xarray dimension for vectorized sampling
+            xs = xr.DataArray(samplepointsGDF.geometry.x, dims="points")
+            ys = xr.DataArray(samplepointsGDF.geometry.y, dims="points")
+
+            # Get bedrock elevation from w4h sample data
+            bedrock_elev = rxr.open_rasterio(w4h.get_resources(scope='state')['bedrock_elev'])[0]
+            bedrock_elev = bedrock_elev.rio.reproject(4326)
+            bedrock_elev = bedrock_elev * 0.3048
+
+            brElevVals = bedrock_elev.sel(x=xs, y=ys, method='nearest')
+
+            if 'CRS' not in st.session_state.plot_distance_type:
+                samplePoints = np.arange(0, utmLength, ptSpacing)
+                mConvertFactor = {'feet': 0.3048,
+                    'meters': 1,
+                    'kilometers': 1000,
+                    'miles': 1609.344}
+                samplePoints /= mConvertFactor[st.session_state.plot_distance_unit]
+            elif str(distCol).lower() in ['latitude', 'latitude', 'lat', 'y', 'northing', 'utmn']:
+                plotCRS = CRS_DICT[st.session_state.plot_crs].code
+                samplePoints = samplepointsGDF.to_crs(plotCRS).geometry.y
+            else:
+                plotCRS = CRS_DICT[st.session_state.plot_crs].code
+                samplePoints = samplepointsGDF.to_crs(plotCRS).geometry.x
+
+            if 'f' in st.session_state.plot_elev_unit:
+                brElevVals = brElevVals / 0.3048
+
+            fig.add_trace(go.Scatter(x=samplePoints,
+                        y=brElevVals,
+                        mode='lines',
+                        name='Statewide Bedrock Surface',
+                        line=dict(color='purple', dash='dot', width=3),
+                        showlegend=True,
+                        ),
+            )
 
         # Display vertical exaggeration
         r = 100
