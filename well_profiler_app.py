@@ -1130,7 +1130,6 @@ def plot_well_profile():
         fig = go.Figure()
         for well in well_id_list:
             wellDF = gdf[gdf['API10'] == well].reset_index(drop=True)
-            #print(wellDF[distCol])
 
             if len(wellDF[distCol]) > 0:
                 minWellElev = min(wellDF["BOTTOM_ELEV"])
@@ -1167,15 +1166,17 @@ def plot_well_profile():
                     name=well
                 ))
 
-        for index, row in gdf.iterrows():
-            #print(row, distCol)
+        newID = None
+        nextOne = False
+        for i, (index, row) in enumerate(gdf.iterrows()):
             xarr = [row[distCol], row[distCol]]
             yarr = [row["TOP_ELEV"], row["BOTTOM_ELEV"]]
+            currID = row["API10"]                
 
             xboxarr = xarr
             yboxarr = yarr
             #xboxarr, yboxarr = linetobox(xarr, yarr)
-            
+
             legendName = row['INTERPRETED']
             showLegend = True
             if row['INTERPRETED'] in legendList:
@@ -1195,31 +1196,61 @@ def plot_well_profile():
             fig.add_trace(go.Scatter(
                 x=xboxarr,
                 y=yboxarr,
-                #fill="toself",
-                #fillcolor=fColor,
                 line=dict(color=fColor, width=2.5),
-                #linecolor=None,
                 mode='lines',
                             
-                # Pattern fill
-                #fillpattern=dict(fgcolor='yellow',
-                #    shape=".",   # "/", "\\", "x", "-", "|", ".", "+"
-                #    bgcolor='black',
-                #    size=1,),
-                #hovertemplate=hoverText,
-                #text=hoverText,
-                hoverinfo='text',           # Only show custom text
+                hoverinfo='skip',
                 hovertext=hoverText,
-                #hovertemplate=(
-                #    "<b>Well:</b> %{customdata[0]}<br>"
-                #    "<b>Formation:</b> %{customdata[1]}<br>"
-                #    "<b>Interpreted:</b> %{customdata[2]}<br>"
-                #    "<extra></extra>"
-                #),
-                #hovertemplate="%{text}<extra></extra>",
                 showlegend=showLegend,
+                
                 name=legendName
             ))
+
+            #fig.add_trace(go.Scatter(
+            #    x=[xboxarr[0]],
+            #    y=[yboxarr[0]],
+            #    mode='markers',
+            #    marker=dict(color='black', size=2),
+            #    hoverinfo='text',
+            #    hovertext=hoverText,
+            #    showlegend=False,
+            #    name=legendName
+            #))
+
+            fig.add_trace(go.Scatter(
+                x=[xboxarr[0]],
+                y=[yboxarr[0]],
+                mode='markers',
+                marker=dict(color='black', size=2),
+                            
+                hoverinfo='text',
+                hovertext=hoverText,
+                showlegend=False,
+                name=legendName
+            ))
+
+            print(yboxarr[0], yboxarr[1], nextOne)
+            if newID != currID:
+                nextOne = True
+            else:
+                nextOne = False
+                
+            if nextOne:
+                fig.add_trace(go.Scatter(
+                    x=[xboxarr[0]],
+                    y=[yboxarr[1]],
+                                
+                    line=dict(color='black', width=1, dash="3px 1px"),
+                    marker=dict(size=4, line=dict(width=0, color='black'), symbol='star-triangle-up'),
+                    mode='markers',
+                    hoverinfo='text',
+                    hovertext=hoverText,                
+                    opacity=0.8,
+                    showlegend=False,
+                ))
+                nextOne = False
+
+            newID = row['API10']
             legendList.append(row["INTERPRETED"])
         
         # Show surface elevation plot if selected
