@@ -1,0 +1,28 @@
+[project]
+name = "iProfiler"
+version = "1.0.0"
+description = "App for sampling and classifying borehole descriptions from wells in the ISGS database"
+readme = "README.md"
+requires-python = ">=3.9"
+
+authors = [
+    { name = "Riley Balikian", email = "balikian@illinois.edu" }
+]
+
+keywords = ["profiles", "geology", "cross sections", "mapping", "GIS"]
+
+dependencies = [
+    'rioxarray',
+    'pandas',
+    'folium',
+    'streamlit-folium',
+    'nbformat',
+    'owslib',
+    'pyproj',
+    'geopandas',
+    'matplotlib',
+    'plotly',
+    'pyodbc',
+    'sqlalchemy',
+    'wells4hydrogeology'
+]
