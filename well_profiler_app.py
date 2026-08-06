@@ -102,7 +102,8 @@ def main():
             try:
                 print("TTYPES", type(st.session_state.wellGDF), type(wellGDF))
                 if st.session_state.wellGDF is not None:
-                    st.session_state.tableTab.dataframe(st.session_state.wellGDF.to_arrow(geometry_encoding='geoarrow'))
+                    #st.session_state.tableTab.dataframe(st.session_state.wellGDF.to_arrow(geometry_encoding='geoarrow'))
+                    pass
                 else:
                     st.session_state.tableTab.write("Point table not read in correctly")
             except Exception:
@@ -961,7 +962,6 @@ def ingest_table(well_source):
             df = pd.read_csv(resDict['well_data'])
             #df.rename(columns={'ID'}, inplace=True)
             df.set_index('ID', drop=True, inplace=True)
-            print(df)
             gdf = gpd.GeoDataFrame(df,
                                    geometry=gpd.points_from_xy(x=df['LONGITUDE'], y=df['LATITUDE'], z=df['ELEVATION']),
                                    crs=4269).to_crs(4326)
