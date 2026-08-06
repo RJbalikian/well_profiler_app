@@ -48,12 +48,8 @@ DEFAULT_OUTPUT_CRS = DEFAULT_POINTS_CRS
 import os
 print(os.getcwd())
 
-with open('thomason_colors.json', 'r') as jf:
+with open('./well_profiler_app/thomason_colors.json', 'r') as jf:
     COLORMAPDICT = json.load(jf)
-
-#with open('plotly_colors.json', 'r') as jf:
-#    COLORMAPDICT = json.load(jf)
-
 
 COLORDF = pd.DataFrame(COLORMAPDICT, index=['Color']).T.reset_index()
 COLORDF.columns = ['INTERPRETED', "PLOTCOLOR"]
