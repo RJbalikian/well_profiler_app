@@ -1,5 +1,5 @@
 [project]
-name = "iprofiler"
+name = "well_profiler_app"
 version = "1.0.0"
 description = "App for sampling and classifying borehole descriptions from wells in the ISGS database"
 readme = "README.md"
