@@ -1,2 +1,2 @@
 [server]
-maxMessageSize = 500  # size in MB, default is 200
+maxMessageSize = 1000  # size in MB, default is 200
