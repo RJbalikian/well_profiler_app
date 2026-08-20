@@ -1,4 +1,4 @@
-from io import BytesIO
+from io import BytesIO, StringIO
 import json
 import pathlib
 import traceback
@@ -909,12 +909,14 @@ def ingest_table(well_source):
         ycoord_col = st.session_state.ycoord_col
     else:
         try:
+            # Initialize connection variables
             server = "datastorm.prairie.illinois.edu"
             database = "GEOPROD"
             driver = "ODBC Driver 17 for SQL Server" # Adjust based on your installed driver version
             connection_url = f"mssql+pyodbc://@{server}/{database}?driver=ODBC+Driver+17+for+SQL+Server&trusted_connection=yes"
             engine = create_engine(connection_url)
 
+            # Read data into pandas dataframes
             boreholeLoc_df = pd.read_sql_table(table_name='Borehole_Locations',
                                             con=engine,
                                             schema='ISGS2',
@@ -925,12 +927,14 @@ def ingest_table(well_source):
                                             schema='ISGS2',
                                             columns=['api10', 'formation', "top", "bottom"]
                                             )
-
+            # Merge locations and data into single dataframe
             wellDF = pd.merge(left=downhole_df,
                             right=boreholeLoc_df,
                             how='inner',
                             left_on='api10',
                             right_on='API10')
+
+            # Clean up dataframe
             wellDF.drop('api10', axis=1, inplace=True)
             wellDF.dropna(subset=["LATITUDE", "LONGITUDE"], inplace=True)
             wellDF = wellDF[['API10', 'LONGITUDE', 'LATITUDE', 'formation', 'top', 'bottom']]
@@ -1248,13 +1252,15 @@ def plot_well_profile():
 
             newID = row['API10']
             legendList.append(row["INTERPRETED"])
-        
+
+        nSamplepts = 10000 # Define the number of points in the surface sampling
         # Show surface elevation plot if selected
         if st.session_state.show_surf_elev:
             profileLineStringUTM = st.session_state.profile_utm.geometry.iloc[0]
             utmLength = profileLineStringUTM.length
-            ptSpacing = utmLength/1000 # Make 1000 points
-            profilePoints = profileLineStringUTM.interpolate(np.arange(0, utmLength, ptSpacing))
+            ptSpacing = utmLength/nSamplepts
+            xDists = np.arange(0, utmLength, ptSpacing)
+            profilePoints = profileLineStringUTM.interpolate(xDists)
             
             samplepointsGDF = gpd.GeoDataFrame(geometry=profilePoints, crs=st.session_state.utm_crs).to_crs(4326)
 
@@ -1262,9 +1268,11 @@ def plot_well_profile():
             ys = xr.DataArray(samplepointsGDF.geometry.y, dims="points")
 
             surfElev = st.session_state.elevation_data.sel(x=xs, y=ys, method='nearest')
+            surfElevM = surfElev
+            surfElevFt = surfElevM / 0.3048
 
             if 'CRS' not in st.session_state.plot_distance_type:
-                samplePoints = np.arange(0, utmLength, ptSpacing)
+                samplePoints = xDists
                 mConvertFactor = {'feet': 0.3048,
                     'meters': 1,
                     'kilometers': 1000,
@@ -1306,10 +1314,10 @@ def plot_well_profile():
             #        name='Surface Elevation'
             #    ))
         if st.session_state.show_br_elev:
-            # Get 1000 profile points for sampling
+            # Get profile points for sampling
             profileLineStringUTM = st.session_state.profile_utm.geometry.iloc[0]
             utmLength = profileLineStringUTM.length
-            ptSpacing = utmLength/100 # Make 1000 points
+            ptSpacing = utmLength/nSamplepts
             profilePoints = profileLineStringUTM.interpolate(np.arange(0, utmLength, ptSpacing))
             
             # Make that into geodataframe
@@ -1412,7 +1420,27 @@ def plot_well_profile():
                         key='well_profile',
                         width='stretch', theme='streamlit',
                         config={'displayModeBar': True})
-            
+
+        profileDF = pd.DataFrame()
+
+        profileDF['xDist_m'] = xDists
+        profileDF["Elev_m"] = surfElevM
+        profileDF["Elev_ft"] = surfElevFt
+        profileDF["XCoord"] = samplepointsGDF.geometry.x
+        profileDF["YCoord"] = samplepointsGDF.geometry.y
+        profileDF["LONGITUDE"] = samplepointsGDF.to_crs(4326).geometry.x
+        profileDF["LATITUDE"] = samplepointsGDF.to_crs(4326).geometry.y
+        csv_buffer = StringIO()
+        profileDF.to_csv(csv_buffer, index=False)
+        csv_data = csv_buffer.getvalue()
+
+        st.download_button("Download Surface Topo",
+                            data=csv_data,
+                            file_name="topodata.csv",
+                            mime="text/csv"
+                            )
+
+
 
 if __name__ == "__main__":
     main()
