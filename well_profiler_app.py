@@ -1,6 +1,7 @@
 from io import BytesIO, StringIO
 import json
 import pathlib
+import os
 import traceback
 
 from streamlit_folium import st_folium
@@ -33,6 +34,7 @@ CRS_LIST = pyproj.database.query_crs_info()
 CRS_STR_LIST = [f"{crs.auth_name}:{crs.code} - {crs.name}" for crs in CRS_LIST]
 CRS_DICT = {f"{crs.auth_name}:{crs.code} - {crs.name}": crs for crs in CRS_LIST}
 IL_LIDAR_URL = r"https://data.isgs.illinois.edu/arcgis/services/Elevation/IL_Statewide_Lidar_DEM_WGS/ImageServer/WMSServer?request=GetCapabilities&service=WMS"
+USGS_3DEP_SOURCE = r"https://elevation.nationalmap.gov/arcgis/services/3DEPElevation/ImageServer/WMSServer?request=GetCapabilities&service=WMS"
 GMRT_BASE_URL = r"https://www.gmrt.org:443/services/GridServer?minlongitude&maxlongitude%2C%20&minlatitude&maxlatitude&format=geotiff&resolution=default&layer=topo"
 RASTER_SRC_DICT = {"ISGS Statewide Lidar": IL_LIDAR_URL,
                    "Global Multi-Resolution Topography (~30m)": GMRT_BASE_URL,
@@ -44,9 +46,6 @@ RASTER_SRC_DICT = {"ISGS Statewide Lidar": IL_LIDAR_URL,
 DEFAULT_POINTS_CRS = "EPSG:4326 - WGS 84"  # "EPSG:6345 - NAD83(2011) / UTM zone 16N"
 DEFAULT_POINTS_CRS_INDEX = CRS_STR_LIST.index(DEFAULT_POINTS_CRS)
 DEFAULT_OUTPUT_CRS = DEFAULT_POINTS_CRS
-
-import os
-print(os.getcwd())
 
 with open('thomason_colors.json', 'r') as jf:
     COLORMAPDICT = json.load(jf)
@@ -61,8 +60,7 @@ def main():
     # Make columns in well tab
     st.session_state.mapContainer = st.container()
     
-
-        # Profile section
+    # Profile section
     with st.sidebar:
         titleCol, emptyCol, menuCol, tCol = st.columns([0.35, 0.1, 0.05, 0.5],
                                                   vertical_alignment='bottom')
@@ -100,7 +98,7 @@ def main():
         else:
             st.session_state.wellGDF = wellGDF = ingest_table(well_source)
             try:
-                print("TTYPES", type(st.session_state.wellGDF), type(wellGDF))
+
                 if st.session_state.wellGDF is not None:
                     #st.session_state.tableTab.dataframe(st.session_state.wellGDF.to_arrow(geometry_encoding='geoarrow'))
                     pass
@@ -153,14 +151,20 @@ def main():
         eSourceCol.pills('Elevation Source',
                         options=["Input table",
                                  'Table column',
-                                "Global dataset (GMRT)",
-                                "Illinois lidar"],
-                        default='Illinois lidar', key='elev_source')
+                                 "Global dataset (GMRT)",
+                                 "USGS 3D elevation program",
+                                 "Illinois lidar"],
+                        default='USGS 3D elevation program', key='elev_source')
         eSource = st.session_state.elev_source
         if eSource == 'Illinois lidar':
             eSpecCol.write('Using ISGS statewide lidar dataset.')
             st.session_state.raster_crs = "EPSG:3857 - WGS 84 / Pseudo-Mercator"
             inputElevIndex = 0
+            inputElevDisabled = True
+        elif "USGS" in str(eSource):
+            eSpecCol.write('Using USGS 3D Elevation Program dataset.')
+            st.session_state.raster_crs = "EPSG:4326 - WGS 84"
+            inputElevIndex = 1
             inputElevDisabled = True
         elif eSource in ['Input table', 'Table column']:
             eColOpts = []
@@ -184,6 +188,7 @@ def main():
                      disabled=inputElevDisabled,
                      index=inputElevIndex,
                      key='elev_unit_in')
+
 
     with st.session_state.mapContainer:
         bSizeCol, bUnitCol, elevUnitCol, showElevCol, projCol = st.columns([0.1, 0.2, 0.2, 0.1, 0.3])
@@ -548,20 +553,13 @@ def draw_base_map(map=None):
 
         if df is not None and "SURFACE_ELEVATION" not in df.columns:
             if not hasattr(st.session_state, 'elevation_data'):
-                print('We dont even exist!')
+
                 st.session_state.elevation_data = get_elevation(st.session_state.elev_source)
             elif st.session_state.elevation_data is None:
                 #print("NONE FIRST")
                 st.session_state.elevation_data = get_elevation(st.session_state.elev_source)
-                elevData = get_elevation(st.session_state.elev_source)
-                print('We noned')
-                print("LOCAL elevData", type(elevData))
-                print("STSS elevation_data", type(st.session_state.elevation_data))
             else:
                 pass
-                print('We elsed')
-                print(type(st.session_state.elevation_data))
-                print(st.session_state.elevation_data)
 
             xs = xr.DataArray(df["LONGITUDE"].values, dims="points")
             ys = xr.DataArray(df["LATITUDE"].values, dims="points")
@@ -579,7 +577,6 @@ def draw_base_map(map=None):
 
             plot_well_profile()
 
-    #print("WE DOING THIS or what?", m)
     st_folium(m,
         #feature_group_to_add=fg,
         use_container_width=True,
@@ -605,7 +602,7 @@ def check_map_drawings():
                                                 predicate="intersects")
         
         if hasattr(st.session_state, 'elevation_data'):
-            print("551 check map drawings sample elevation")
+
             uniqueWells = np.unique(st.session_state.buffer_points['API10'])
             # Potential update: use xarray indexing to sample data values
             xs = xr.DataArray(st.session_state.buffer_points["LONGITUDE"].values, dims="points")
@@ -662,7 +659,7 @@ def make_profiles():
         if hasattr(st.session_state, 'elevation_data'):
             if st.session_state.elevation_data is None:
                 st.session_state.elevation_data = get_elevation(st.session_state.elev_source)
-            print('600 make profiles SAMPLING ELEVATION')
+
             xArr = xr.DataArray(st.session_state.buffer_points['LONGITUDE'].values, dims="points")
             yArr = xr.DataArray(st.session_state.buffer_points["LATITUDE"].values, dims="points")
 
@@ -722,7 +719,7 @@ def get_elevation(elev_source):
             #coords = (-88.857362, 42.25637743)
 
     # Get the correct/specified raster source
-    print("CHECKING ESOURCE", hasattr(st.session_state, "elev_source"))
+
     if "Illinois" in st.session_state.elev_source:
         elevation_source = IL_LIDAR_URL
     else:
@@ -759,7 +756,6 @@ def get_elevation(elev_source):
 
     if hasattr(st.session_state, 'buffer_points') and st.session_state.buffer_points is not None:
         # if hasattr(st.session_state, 'well_df_IN') and st.session_state.well_df_IN is not None:
-        print("\t yes to buffer points")
         df = st.session_state.buffer_points
         
         coords = df
@@ -805,25 +801,47 @@ def get_elevation(elev_source):
         # Read in data from service or file, as appropriate
         # ISGS lidar is from the statewide WGS84 service, read in as an (rio)xarray DataSet
         if "Illinois" in st.session_state.elev_source:
-            print("READING FROM ILLINOIS DATA WMS")
-            wms = WebMapService(elevation_source)
+            try:
+                print("READING FROM ILLINOIS DATA WMS")
+                wms = WebMapService(elevation_source)
 
-            bbox = (rasterXMin, rasterYMin, rasterXMax, rasterYMax)
+                bbox = (rasterXMin, rasterYMin, rasterXMax, rasterYMax)
 
-            img = wms.getmap(
-                layers=['IL_Statewide_Lidar_DEM_WGS:None'],
-                srs='EPSG:3857',
-                bbox=bbox,
-                size=(256, 256),
-                format='image/tiff',
-                transparent=True
-                )
+                img = wms.getmap(
+                    layers=['IL_Statewide_Lidar_DEM_WGS:None'],
+                    srs='EPSG:3857',
+                    bbox=bbox,
+                    size=(256, 256),
+                    format='image/tiff',
+                    transparent=True
+                    )
 
-            bio = BytesIO(img.read())
-            elevData_rxr = rxr.open_rasterio(bio)[0]
-            elevData_ft = elevData_rxr.rio.reproject(output_crs)
-            elevData_m = elevData_ft * 0.3048
-            st.session_state.elevation_data = elevData_m
+                bio = BytesIO(img.read())
+                elevData_rxr = rxr.open_rasterio(bio)[0]
+                elevData_ft = elevData_rxr.rio.reproject(output_crs)
+                elevData_m = elevData_ft * 0.3048
+                st.session_state.elevation_data = elevData_m
+            except Exception:
+                print("DIDN'T WORK, USING USGS Service")
+                # Use the USGS 3DEP WMS
+                wms = WebMapService(USGS_3DEP_SOURCE)
+
+                bbox = (rasterXMin, rasterYMin, rasterXMax, rasterYMax)
+
+                img = wms.getmap(
+                    layers=['3DEPElevation'],
+                    srs='EPSG:4326',
+                    bbox=bbox,
+                    size=(256, 256),
+                    format='image/tiff',
+                    transparent=True
+                    )
+
+                bio = BytesIO(img.read())
+                elevData_rxr = rxr.open_rasterio(bio)[0]
+                elevData_m = elevData_rxr.rio.reproject(output_crs)
+                elevData_ft = elevData_m / 0.3048
+                st.session_state.elevation_data = elevData_m
         else:
             # GMRT_URL = r"https://www.gmrt.org:443/services/GridServer?minlongitude=-88.4&maxlongitude=-88.2%2C%20&minlatitude=40.1&maxlatitude=40.3&format=geotiff&resolution=default&layer=topo"
             GMRT_URL = GMRT_BASE_URL.replace('minlongitude', f"minlongitude={rasterXMin:0.4f}")
@@ -842,8 +860,7 @@ def get_elevation(elev_source):
             elevData_ft = elevData_m / 0.3048
             st.session_state.elevation_data = elevData_m
 
-        print("ELEVDATA GOT IT")
-        elevData_m[0].plot()
+        #elevData_m[0].plot()
         return elevData_m
 
 
@@ -947,10 +964,7 @@ def ingest_table(well_source):
 
     #st.session_state.well_df_IN = wellDF
     #st.session_state.well_columns = wellDF.columns
-    #print("WELLDFIN", type(st.session_state.well_df_IN))
-    #print("WELLINCRS", type(well_input_crs))
-    #print("XXXCRD", type(st.session_state.xcoord_col))
-    #print("YYYYYYYYYXXXCRD" ,type(st.session_state.ycoord_col))
+
     try:
         geocol = gpd.points_from_xy(wellDF[xcoord_col],
                                     wellDF[ycoord_col])
@@ -970,10 +984,7 @@ def ingest_table(well_source):
                                    geometry=gpd.points_from_xy(x=df['LONGITUDE'], y=df['LATITUDE'], z=df['ELEVATION']),
                                    crs=4269).to_crs(4326)
             gdf['API10'] = gdf['API_NUMBER'].astype(int)/100
-            
-            print(gdf.columns)
-            
-            
+
         except Exception:
             traceback.print_exc()
             gdf = None
@@ -1068,7 +1079,6 @@ def plot_well_profile():
         maxElev = max(gdf.loc[:, "SURFACE_ELEVATION"])
         gdf = gdf.dropna(subset=['API10', "LONGITUDE", "LATITUDE", "FORMATION", "INTERPRETED"])
 
-        print("MINNMAX", minElev, maxElev)
         eRange = abs(maxElev - minElev)
         ePad = eRange * 0.1
         yLIM = [minElev-ePad, maxElev+(ePad/2)]
@@ -1229,7 +1239,6 @@ def plot_well_profile():
                 name=legendName
             ))
 
-            print(yboxarr[0], yboxarr[1], nextOne)
             if newID != currID:
                 nextOne = True
             else:
@@ -1365,13 +1374,12 @@ def plot_well_profile():
             xDist_m = st.session_state.profile_buffer_utm.geometry.length
             xDist_plotCRS = st.session_state.profile_buffer_utm.to_crs(CRS_DICT[st.session_state.plot_crs].code).length
             xDist_plotCoords = (xDist_plotCRS / xDist_m).values[0]
-            print(xDist_plotCoords)
+
             xDist_m = xDist_m + (2*st.session_state.buffer_size_m)
             yDist_m = yLIM[1] - yLIM[0]
             if st.session_state.plot_elev_unit == 'feet':
                 yDist_m = yDist_m * 0.3048
 
-            print(st.session_state.profile_buffer.geometry.bounds)
             if distCol == 'LATITUDE':
                 maxVal = 'maxy'
                 minVal = 'miny'
@@ -1383,11 +1391,11 @@ def plot_well_profile():
             center_X = st.session_state.profile_buffer.geometry.bounds[minVal].values[0] - (0.01 * xRange)
             center_Y = np.mean(yLIM)
             xRadius = r * xDist_plotCoords
-            print("CENTER", center_X, center_Y)
+
         else:
             maxXDist_m = st.session_state.profile_buffer_utm.geometry.length.values[0]
             maxXDist_m += (2*st.session_state.buffer_size_m)
-            print(maxXDist_m)
+
             mConvertFactor = {'feet': 0.3048,
                               'meters': 1,
                               'kilometers': 1000,
@@ -1396,7 +1404,7 @@ def plot_well_profile():
 
             xRange = xDist_plotCoords
             xRadius = r / mConvertFactor[st.session_state.plot_distance_unit]
-            print(xDist_plotCoords)
+
             center_X = -0.01 * xRange
             center_Y = np.mean(yLIM)
         
