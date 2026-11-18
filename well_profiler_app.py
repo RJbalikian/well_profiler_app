@@ -24,6 +24,9 @@ from sqlalchemy import create_engine
 import streamlit as st
 import w4h
 import xarray as xr
+import pyproj, os
+os.environ["PROJ_LIB"] = pyproj.datadir.get_data_dir()
+os.environ["PROJ_DATA"] = pyproj.datadir.get_data_dir()
 
 st.set_page_config(page_title='Well Profiler App',
                    page_icon=':material/full_stacked_bar_chart:',
@@ -1160,7 +1163,7 @@ def plot_well_profile():
                     name=well
                 ))
 
-                hoverText = f"{well} ({wellDF["LONGITUDE"].iloc[0]}, {wellDF["LATITUDE"].iloc[0]})"
+                hoverText = f"{well} ({wellDF['LONGITUDE'].iloc[0]}, {wellDF['LATITUDE'].iloc[0]})"
                 fig.add_trace(go.Scatter(
                     x=[wellX],
                     y=[maxWellElev+3],
@@ -1195,7 +1198,7 @@ def plot_well_profile():
             eUnitStr = 'm'
             if st.session_state.plot_elev_unit.lower() in ['f', 'ft', "'", 'foot', 'feet']:
                 eUnitStr = "'"
-            hoverText = f"{row["TOP"]:.1f}{eUnitStr}-{row["BOTTOM"]:.1f}{eUnitStr} (Elev: {row["TOP_ELEV"]:.1f}{eUnitStr}-{row['BOTTOM_ELEV']:.1f}{eUnitStr}) <br> Description: {row['FORMATION'][:25]} <br> Interpretation: {row['INTERPRETED']}"
+            hoverText = f"{row['TOP']:.1f}{eUnitStr}-{row['BOTTOM']:.1f}{eUnitStr} (Elev: {row['TOP_ELEV']:.1f}{eUnitStr}-{row['BOTTOM_ELEV']:.1f}{eUnitStr}) <br> Description: {row['FORMATION'][:25]} <br> Interpretation: {row['INTERPRETED']}"
                     
             # Define rectangle corners
             try:
